@@ -1,0 +1,17 @@
+export const STORIES = [
+  { key: 'fox',        emoji: '🦊', title: 'The Brave Little Fox',           subtitle: 'A tale of kindness and sharing',       moral: 'kindness',       ageRange: '3–5' },
+  { key: 'star',       emoji: '⭐', title: 'The Star Who Feared the Dark',    subtitle: 'Finding courage within',               moral: 'courage',        ageRange: '3–5' },
+  { key: 'elephant',   emoji: '🐘', title: "Ellie's Unexpected Friend",       subtitle: 'How friendship bridges differences',    moral: 'friendship',     ageRange: '4–6' },
+  { key: 'diwali',     emoji: '🪔', title: 'A Thousand Lamps',                subtitle: 'A Diwali night adventure',             moral: 'gratitude',      ageRange: '4–7' },
+  { key: 'rain',       emoji: '☁️', title: 'Raja the Rain Cloud',             subtitle: 'The joy of giving',                   moral: 'generosity',     ageRange: '3–5' },
+  { key: 'arjun',      emoji: '🎒', title: "Arjun's First Day",               subtitle: 'Big feelings, bigger heart',           moral: 'bravery',        ageRange: '5–7' },
+  { key: 'turtle',     emoji: '🐢', title: 'Tuku and the Impossible Hill',    subtitle: 'One step at a time',                  moral: 'perseverance',   ageRange: '4–6' },
+  { key: 'mango',      emoji: '🥭', title: "Maya's Mango Wish",               subtitle: 'The gift of remembering',             moral: 'gratitude',      ageRange: '4–7' },
+  { key: 'lighthouse', emoji: '🏮', title: 'The Lonely Lighthouse',           subtitle: 'Being seen for what you do',          moral: 'helpfulness',    ageRange: '4–7' },
+  { key: 'smile',      emoji: '🌸', title: "Where Did Priya's Smile Go?",     subtitle: 'The kindness of just staying',        moral: 'empathy',        ageRange: '5–8' },
+  { key: 'painter',    emoji: '🎨', title: 'The Boy Who Painted Stars',       subtitle: 'Art is feeling, not perfection',      moral: 'creativity',     ageRange: '5–8' },
+  { key: 'blanket',    emoji: '🧡', title: "Nani's Warm Blanket",             subtitle: 'Love stitched in every thread',       moral: 'love',           ageRange: '3–6' },
+  { key: 'firefly',    emoji: '✨', title: 'The Firefly Who Forgot to Shine', subtitle: 'Your light is the right light',       moral: 'self-worth',     ageRange: '3–6' },
+  { key: 'river',      emoji: '🏞️', title: 'Rohan and the Crying River',      subtitle: 'One bag at a time',                   moral: 'responsibility', ageRange: '5–8' },
+  { key: 'fairy',      emoji: '🌙', title: "The Sleep Fairy's Secret",        subtitle: 'Tonight is only for dreaming',        moral: 'comfort',        ageRange: '3–6' },
+]
