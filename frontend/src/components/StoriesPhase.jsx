@@ -4,7 +4,7 @@ import StoryReader from './StoryReader'
 import CustomTextModal from './CustomTextModal'
 import { STORIES } from '../data/stories'
 
-export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voiceJustCreated, onToastDismissed }) {
+export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, onReRecord, voiceJustCreated, onToastDismissed }) {
   const [viewMode, setViewMode] = useState('grid')
   const [playedKeys, setPlayedKeys] = useState(new Set())
   const [audioCache, setAudioCache] = useState({})       // story.key → { audioUrl, alignment, text }
@@ -53,7 +53,7 @@ export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voi
       const r = await fetch('/api/stories/speak-timestamped', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id: voiceId, story_key: story.key }),
+        body: JSON.stringify({ voice_id: voiceId, story_key: story.key, session_token: sessionToken }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -113,9 +113,25 @@ export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voi
       {showCustomModal && (
         <CustomTextModal
           voiceId={voiceId}
+          sessionToken={sessionToken}
           onClose={() => setShowCustomModal(false)}
           onOpenReader={openCustomReader}
         />
+      )}
+
+      {/* Demo mode banner */}
+      {isDemo && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-4 text-sm">
+          <span>
+            <strong>Demo voice active</strong> — you're hearing a sample voice, not your own.
+          </span>
+          <button
+            onClick={onReRecord}
+            className="shrink-0 bg-white text-indigo-700 font-semibold px-4 py-1.5 rounded-full text-xs hover:bg-indigo-50 transition-colors"
+          >
+            Record my voice →
+          </button>
+        </div>
       )}
 
       {/* Voice-ready toast */}
@@ -126,7 +142,7 @@ export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voi
         </div>
       )}
 
-      <div className="min-h-screen px-4 py-10">
+      <div className={`min-h-screen px-4 py-10 ${isDemo ? 'pt-20' : ''}`}>
         <div className="max-w-4xl mx-auto">
 
           {/* Header */}

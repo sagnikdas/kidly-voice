@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 const MAX_CHARS = 3000
 
-export default function CustomTextModal({ voiceId, onClose, onOpenReader }) {
+export default function CustomTextModal({ voiceId, sessionToken, onClose, onOpenReader }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -16,7 +16,7 @@ export default function CustomTextModal({ voiceId, onClose, onOpenReader }) {
       const r = await fetch('/api/voice/speak-custom', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id: voiceId, text: text.trim() }),
+        body: JSON.stringify({ voice_id: voiceId, text: text.trim(), session_token: sessionToken }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))

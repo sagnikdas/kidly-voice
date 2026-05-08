@@ -1,0 +1,46 @@
+# Kidly Voice — runtime configuration
+# All rate limits use the format "<count>/<period>"
+# Valid periods: second, minute, hour, day
+# Changes take effect on the next deploy (fly deploy).
+
+[voices]
+# Fallback voice used when a user has no credentials (demo / lost-session mode).
+# Set to empty string "" to disable demo mode and send users straight to recording.
+# Change this value and run `fly deploy` — no code change needed.
+default_voice_id = "MXGyTMlsvQgQ4BL0emIa"
+
+[cors]
+# Allowed origins for local development.
+# In production set CORS_ORIGINS env var: fly secrets set CORS_ORIGINS=https://kidly-voice.fly.dev
+origins = ["http://localhost:5173", "http://localhost:8000", "http://localhost:3000"]
+
+[uploads]
+# Maximum size per recording chunk in megabytes. Rejects oversized uploads early.
+max_recording_mb = 50
+
+[rate_limits]
+# Applied to every route that has no specific override below.
+global_default          = "60/minute"
+
+# Voice recording upload chunks (multiple per session).
+recording_upload        = "30/minute"
+
+# Voice cloning — hits ElevenLabs and costs money. Keep this tight.
+voice_clone             = "5/hour"
+
+# Preview clip generation — also hits ElevenLabs.
+voice_preview           = "10/hour"
+
+# Story TTS — hits ElevenLabs only on the very first play per user+story.
+story_speak             = "30/hour"
+story_speak_timestamped = "30/hour"
+
+# Custom text TTS — hits ElevenLabs every time (no story-key cache).
+voice_speak_custom      = "20/hour"
+
+# User lookup and save — prevent email enumeration and spam.
+user_save               = "10/hour"
+user_lookup             = "20/hour"
+
+# Feedback form submissions.
+feedback                = "5/hour"

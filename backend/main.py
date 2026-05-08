@@ -3,14 +3,20 @@ import json
 import uuid
 import hashlib
 import base64
+import tomllib
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 import httpx
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 _env = Path(__file__).resolve().parent / ".env"
 if _env.exists():
@@ -23,6 +29,51 @@ if _env.exists():
 EL_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 EL_TTS_MODEL = os.getenv("ELEVENLABS_TTS_MODEL", "eleven_turbo_v2_5")
 EL_TTS_FORMAT = os.getenv("ELEVENLABS_TTS_FORMAT", "mp3_22050_32")
+
+# Admin secret — set via: fly secrets set ADMIN_SECRET=<long-random-string>
+# If unset, all admin endpoints return 403.
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
+
+# Load config.toml — missing file falls back to defaults so local dev still works.
+_cfg_path = Path(__file__).resolve().parent / "config.toml"
+try:
+    with open(_cfg_path, "rb") as _f:
+        _cfg = tomllib.load(_f)
+except FileNotFoundError:
+    _cfg = {}
+
+# Default / demo voice — from config.toml [voices].default_voice_id.
+# Users with no credentials are served stories with this voice (demo mode).
+# Empty string disables demo mode; users are sent straight to the record flow.
+DEFAULT_VOICE_ID: str = _cfg.get("voices", {}).get("default_voice_id", "")
+# Well-known token that is ONLY valid for the default voice — never stored in users.json.
+DEFAULT_SESSION_TOKEN: str = "kidly-demo-voice-v1"
+
+_rl = _cfg.get("rate_limits", {})
+RL_GLOBAL           = _rl.get("global_default",           "60/minute")
+RL_RECORDING        = _rl.get("recording_upload",         "30/minute")
+RL_VOICE_CLONE      = _rl.get("voice_clone",              "5/hour")
+RL_VOICE_PREVIEW    = _rl.get("voice_preview",            "10/hour")
+RL_STORY_SPEAK      = _rl.get("story_speak",              "30/hour")
+RL_STORY_SPEAK_TS   = _rl.get("story_speak_timestamped",  "30/hour")
+RL_SPEAK_CUSTOM     = _rl.get("voice_speak_custom",       "20/hour")
+RL_USER_SAVE        = _rl.get("user_save",                "10/hour")
+RL_USER_LOOKUP      = _rl.get("user_lookup",              "20/hour")
+RL_FEEDBACK         = _rl.get("feedback",                 "5/hour")
+
+# CORS origins — set CORS_ORIGINS env var in production (comma-separated).
+# Falls back to config.toml [cors].origins for local dev.
+_cors_env = os.getenv("CORS_ORIGINS", "")
+CORS_ORIGINS: list[str] = (
+    [o.strip() for o in _cors_env.split(",") if o.strip()]
+    if _cors_env
+    else _cfg.get("cors", {}).get("origins", ["*"])
+)
+
+# Max recording upload size in bytes — from config.toml [uploads].max_recording_mb
+MAX_REC_BYTES: int = _cfg.get("uploads", {}).get("max_recording_mb", 50) * 1024 * 1024
+
+log = logging.getLogger("kidly")
 
 # Recognised audio extensions for voice-clone uploads. Anything else (e.g. macOS
 # .DS_Store) found in the session dir is ignored before being shipped to ElevenLabs.
@@ -76,21 +127,48 @@ for d in [REC_DIR, TTS_DIR]:
 
 
 def _load_users() -> dict:
+    """Returns {"sessions": {token: entry}, "email_index": {email: token}}."""
     if USERS_FILE.exists():
         try:
-            return json.loads(USERS_FILE.read_text())
+            data = json.loads(USERS_FILE.read_text())
+            if "sessions" in data:
+                return data
         except Exception:
-            return {}
-    return {}
+            pass
+    return {"sessions": {}, "email_index": {}}
 
 
 def _save_users(users: dict):
     USERS_FILE.write_text(json.dumps(users, indent=2))
 
+
+def _validate_session(voice_id: str, session_token: str):
+    """Raises 403 if session_token does not own voice_id."""
+    # Demo voice has a well-known constant token — no file lookup needed.
+    if DEFAULT_VOICE_ID and voice_id == DEFAULT_VOICE_ID and session_token == DEFAULT_SESSION_TOKEN:
+        return
+    users = _load_users()
+    entry = users["sessions"].get(session_token)
+    if not entry or entry.get("voice_id") != voice_id:
+        raise HTTPException(403, "Access denied — session does not match this voice.")
+
+
+def _check_admin(request: Request):
+    """Raises 403 if X-Admin-Key header does not match ADMIN_SECRET."""
+    if not ADMIN_SECRET or request.headers.get("X-Admin-Key", "") != ADMIN_SECRET:
+        raise HTTPException(403, "Admin access denied.")
+
+# 60 requests/minute per IP applies to every route by default.
+# Individual endpoints below may override with stricter limits.
+limiter = Limiter(key_func=get_remote_address, default_limits=[RL_GLOBAL])
+
 app = FastAPI(title="Kidly Voice")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -499,11 +577,12 @@ class CloneRequest(BaseModel):
 class SpeakRequest(BaseModel):
     voice_id: str
     story_key: str
+    session_token: str
 
 
 class SaveUserRequest(BaseModel):
     email: str
-    voice_id: str
+    session_token: str
 
 
 class FeedbackRequest(BaseModel):
@@ -514,16 +593,19 @@ class FeedbackRequest(BaseModel):
 
 class VoicePreviewRequest(BaseModel):
     voice_id: str
+    session_token: str
 
 
 class SpeakTimestampedRequest(BaseModel):
     voice_id: str
     story_key: str
+    session_token: str
 
 
 class CustomSpeakRequest(BaseModel):
     voice_id: str
     text: str
+    session_token: str
 
 
 PREVIEW_TEXT = (
@@ -533,7 +615,9 @@ PREVIEW_TEXT = (
 
 
 @app.post("/api/recording")
+@limiter.limit(RL_RECORDING)
 async def upload_recording(
+    request: Request,
     file: UploadFile = File(...),
     session_id: str = Form(...),
     is_first: str = Form("false"),
@@ -547,12 +631,15 @@ async def upload_recording(
     ext = _resolve_recording_ext(file.content_type, file.filename)
     fname = f"{uuid.uuid4().hex}{ext}"
     content = await file.read()
+    if len(content) > MAX_REC_BYTES:
+        raise HTTPException(413, f"File too large — maximum {MAX_REC_BYTES // 1024 // 1024} MB per chunk.")
     (session_dir / fname).write_bytes(content)
     return {"ok": True}
 
 
 @app.post("/api/voice/clone")
-async def clone_voice(req: CloneRequest):
+@limiter.limit(RL_VOICE_CLONE)
+async def clone_voice(request: Request, req: CloneRequest):
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set — copy .env.example to .env and add your key")
 
@@ -592,17 +679,33 @@ async def clone_voice(req: CloneRequest):
 
         voice_id = r.json()["voice_id"]
 
-    # Recordings are only needed for the clone call — delete them to save disk space.
+    # Recordings are only needed for the clone call — delete them immediately.
     import shutil
     if session_dir.exists():
         shutil.rmtree(session_dir, ignore_errors=True)
 
-    return {"voice_id": voice_id}
+    # Bind a session token to this voice_id. The client must present this token
+    # with every future TTS request — prevents any other party from using the voice.
+    session_token = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    users = _load_users()
+    users["sessions"][session_token] = {
+        "voice_id": voice_id,
+        "email": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    _save_users(users)
+    log.warning("[NEW VOICE] voice_id=%s", voice_id)
+
+    return {"voice_id": voice_id, "session_token": session_token}
 
 
 @app.post("/api/voice/preview")
-async def voice_preview(req: VoicePreviewRequest):
+@limiter.limit(RL_VOICE_PREVIEW)
+async def voice_preview(request: Request, req: VoicePreviewRequest):
     """Generate a short voice preview sample, cached per voice_id."""
+    _validate_session(req.voice_id, req.session_token)
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
 
@@ -630,7 +733,9 @@ async def voice_preview(req: VoicePreviewRequest):
 
 
 @app.post("/api/stories/speak")
-async def speak(req: SpeakRequest):
+@limiter.limit(RL_STORY_SPEAK)
+async def speak(request: Request, req: SpeakRequest):
+    _validate_session(req.voice_id, req.session_token)
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
 
@@ -663,8 +768,10 @@ async def speak(req: SpeakRequest):
 
 
 @app.post("/api/stories/speak-timestamped")
-async def speak_timestamped(req: SpeakTimestampedRequest):
+@limiter.limit(RL_STORY_SPEAK_TS)
+async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
     """TTS with character-level alignment for word-sync highlighting."""
+    _validate_session(req.voice_id, req.session_token)
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
 
@@ -709,8 +816,10 @@ async def speak_timestamped(req: SpeakTimestampedRequest):
 
 
 @app.post("/api/voice/speak-custom")
-async def speak_custom(req: CustomSpeakRequest):
+@limiter.limit(RL_SPEAK_CUSTOM)
+async def speak_custom(request: Request, req: CustomSpeakRequest):
     """TTS for user-provided text with alignment, cached by content hash."""
+    _validate_session(req.voice_id, req.session_token)
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
     if not req.text or not req.text.strip():
@@ -761,27 +870,36 @@ async def get_audio(filename: str):
 
 
 @app.post("/api/user/save")
-async def save_user(req: SaveUserRequest):
+@limiter.limit(RL_USER_SAVE)
+async def save_user(request: Request, req: SaveUserRequest):
     email = req.email.lower().strip()
-    if not email or not req.voice_id:
-        raise HTTPException(400, "email and voice_id are required")
+    if not email or not req.session_token:
+        raise HTTPException(400, "email and session_token are required")
     users = _load_users()
-    users[email] = {
-        "voice_id": req.voice_id,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
+    if req.session_token not in users["sessions"]:
+        raise HTTPException(404, "Session not found — please re-record your voice.")
+    users["sessions"][req.session_token]["email"] = email
+    users["sessions"][req.session_token]["updated_at"] = datetime.now(timezone.utc).isoformat()
+    users["email_index"][email] = req.session_token
     _save_users(users)
+    log.warning("[NEW USER] email=%s", email)
     return {"ok": True}
 
 
 @app.get("/api/user/lookup")
-async def lookup_user(email: str):
-    entry = _load_users().get(email.lower().strip())
-    return {"voice_id": entry["voice_id"] if entry else None}
+@limiter.limit(RL_USER_LOOKUP)
+async def lookup_user(request: Request, email: str):
+    users = _load_users()
+    token = users["email_index"].get(email.lower().strip())
+    if not token:
+        return {"voice_id": None, "session_token": None}
+    entry = users["sessions"].get(token, {})
+    return {"voice_id": entry.get("voice_id"), "session_token": token}
 
 
 @app.post("/api/feedback")
-async def save_feedback(req: FeedbackRequest):
+@limiter.limit(RL_FEEDBACK)
+async def save_feedback(request: Request, req: FeedbackRequest):
     existing: list = []
     if FEEDBACK_FILE.exists():
         try:
@@ -795,6 +913,7 @@ async def save_feedback(req: FeedbackRequest):
         "ts": datetime.now(timezone.utc).isoformat(),
     })
     FEEDBACK_FILE.write_text(json.dumps(existing, indent=2))
+    log.warning("[FEEDBACK] email=%s msg=%s", req.email, (req.message or "")[:120])
     return {"ok": True}
 
 
@@ -803,11 +922,21 @@ async def health():
     return {"ok": True}
 
 
+@app.get("/api/voice/default")
+@limiter.limit("30/minute")
+async def get_default_voice(request: Request):
+    """Returns the demo voice credentials. voice_id is null when demo mode is disabled."""
+    if not DEFAULT_VOICE_ID:
+        return {"voice_id": None, "session_token": None}
+    return {"voice_id": DEFAULT_VOICE_ID, "session_token": DEFAULT_SESSION_TOKEN}
+
+
 # ── Voice management (admin) ───────────────────────────────────────────────────
 
 @app.get("/api/admin/voices")
-async def list_cloned_voices():
+async def list_cloned_voices(request: Request):
     """List all cloned voices on the ElevenLabs account."""
+    _check_admin(request)
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set")
     async with httpx.AsyncClient(timeout=30) as client:
@@ -827,8 +956,9 @@ async def list_cloned_voices():
 
 
 @app.delete("/api/admin/voices/{voice_id}")
-async def delete_voice(voice_id: str):
+async def delete_voice(request: Request, voice_id: str):
     """Delete a single cloned voice by ID."""
+    _check_admin(request)
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set")
     async with httpx.AsyncClient(timeout=30) as client:
@@ -842,8 +972,9 @@ async def delete_voice(voice_id: str):
 
 
 @app.delete("/api/admin/voices")
-async def delete_all_cloned_voices():
+async def delete_all_cloned_voices(request: Request):
     """Delete every cloned voice on the account. Irreversible."""
+    _check_admin(request)
     if not EL_KEY:
         raise HTTPException(500, "ELEVENLABS_API_KEY not set")
     async with httpx.AsyncClient(timeout=60) as client:

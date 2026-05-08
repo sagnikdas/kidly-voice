@@ -6,11 +6,15 @@ const STEPS = [
   { label: 'Your voice is ready!' },
 ]
 
-export default function CloningPhase({ sessionId, recordings, email, onVoiceReady, onBack }) {
+export default function CloningPhase({ sessionId, recordings, email: initialEmail, onVoiceReady, onBack }) {
   const [stepIdx, setStepIdx] = useState(0)
   const [err, setErr] = useState('')
   const [retryCount, setRetryCount] = useState(0)
   const [voiceId, setVoiceId] = useState('')
+  const [sessionToken, setSessionToken] = useState('')
+  const [recoveryEmail, setRecoveryEmail] = useState(initialEmail || '')
+  const [emailSaved, setEmailSaved] = useState(!!initialEmail)
+  const [emailSaving, setEmailSaving] = useState(false)
 
   // Preview state
   const [previewBusy, setPreviewBusy] = useState(false)
@@ -30,6 +34,7 @@ export default function CloningPhase({ sessionId, recordings, email, onVoiceRead
     setErr('')
     setStepIdx(0)
     setVoiceId('')
+    setSessionToken('')
     setPreviewUrl('')
     setPreviewBusy(false)
     setPreviewErr('')
@@ -64,22 +69,38 @@ export default function CloningPhase({ sessionId, recordings, email, onVoiceRead
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || 'Voice cloning failed')
       }
-      const { voice_id } = await r.json()
+      const { voice_id, session_token } = await r.json()
 
-      // Persist email → voice_id server-side so the user can restore from any device.
-      if (email) {
+      // If email was already provided on landing, save immediately.
+      if (initialEmail) {
         fetch('/api/user/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, voice_id }),
+          body: JSON.stringify({ email: initialEmail, session_token }),
         }).catch(() => {})
+        setEmailSaved(true)
       }
 
       setVoiceId(voice_id)
+      setSessionToken(session_token)
       setStepIdx(2)
     } catch (e) {
       setErr(e.message)
     }
+  }
+
+  const saveRecoveryEmail = async () => {
+    if (!recoveryEmail.trim() || emailSaving || !sessionToken) return
+    setEmailSaving(true)
+    try {
+      await fetch('/api/user/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recoveryEmail.trim(), session_token: sessionToken }),
+      })
+      setEmailSaved(true)
+    } catch {}
+    finally { setEmailSaving(false) }
   }
 
   const loadPreview = async () => {
@@ -90,7 +111,7 @@ export default function CloningPhase({ sessionId, recordings, email, onVoiceRead
       const r = await fetch('/api/voice/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id: voiceId }),
+        body: JSON.stringify({ voice_id: voiceId, session_token: sessionToken }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -173,8 +194,42 @@ export default function CloningPhase({ sessionId, recordings, email, onVoiceRead
             )}
           </div>
 
+          {/* Email recovery — shown when no email was provided on landing */}
+          {!emailSaved ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-left space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Save your voice access</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Enter your email so you can recover your cloned voice on any device.
+                  Without it, clearing your browser loses your voice permanently.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  value={recoveryEmail}
+                  onChange={e => setRecoveryEmail(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && saveRecoveryEmail()}
+                  placeholder="your@email.com"
+                  className="flex-1 px-3 py-2 text-sm border border-amber-200 rounded-xl focus:border-orange-400 outline-none bg-white"
+                />
+                <button
+                  onClick={saveRecoveryEmail}
+                  disabled={emailSaving || !recoveryEmail.trim()}
+                  className="px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-semibold transition-colors"
+                >
+                  {emailSaving ? '…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-green-600 font-medium">
+              ✓ Voice saved to {recoveryEmail || initialEmail} — recoverable from any device
+            </p>
+          )}
+
           <button
-            onClick={() => onVoiceReady(voiceId)}
+            onClick={() => onVoiceReady(voiceId, sessionToken)}
             className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-2xl font-semibold transition-colors"
           >
             Go to Stories →
