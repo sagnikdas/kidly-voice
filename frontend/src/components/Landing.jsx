@@ -1,4 +1,4 @@
-export default function Landing({ email, setEmail, onStart }) {
+export default function Landing({ email, setEmail, onStart, restoring }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16">
       {/* Hero */}
@@ -31,14 +31,22 @@ export default function Landing({ email, setEmail, onStart }) {
         {/* CTA */}
         <button
           onClick={onStart}
-          className="w-full py-4 bg-orange-500 hover:bg-orange-600 text-white text-lg font-semibold rounded-2xl transition-colors shadow-lg shadow-orange-100"
+          disabled={restoring}
+          className="w-full py-4 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white text-lg font-semibold rounded-2xl transition-colors shadow-lg shadow-orange-100 flex items-center justify-center gap-2"
         >
-          Get started — it's free →
+          {restoring ? (
+            <>
+              <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              Restoring your voice…
+            </>
+          ) : (
+            'Get started — it\'s free →'
+          )}
         </button>
 
         {/* Trust signals */}
         <div className="flex items-center justify-center gap-6 mt-8 text-sm text-gray-400 flex-wrap">
-          <span>✓ No account needed</span>
+          <span>✓ No password needed</span>
           <span>✓ Takes 2 minutes</span>
           <span>✓ 15 stories ready</span>
         </div>

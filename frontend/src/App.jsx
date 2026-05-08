@@ -8,6 +8,7 @@ export default function App() {
   const [phase, setPhase] = useState('landing')
   const [email, setEmail] = useState('')
   const [voiceId, setVoiceId] = useState(() => localStorage.getItem('kidly_voice_id') || '')
+  const [restoring, setRestoring] = useState(false)
   const [voiceJustCreated, setVoiceJustCreated] = useState(false)
   const [sessionId] = useState(() => {
     let id = localStorage.getItem('kidly_session')
@@ -43,13 +44,36 @@ export default function App() {
     }
   }
 
+  const onStart = async () => {
+    if (email.trim()) {
+      setRestoring(true)
+      try {
+        const r = await fetch(`/api/user/lookup?email=${encodeURIComponent(email.trim())}`)
+        if (r.ok) {
+          const { voice_id } = await r.json()
+          if (voice_id) {
+            localStorage.setItem('kidly_voice_id', voice_id)
+            setVoiceId(voice_id)
+            setPhase('stories')
+            return
+          }
+        }
+      } catch {}
+      finally {
+        setRestoring(false)
+      }
+    }
+    setPhase('record')
+  }
+
   return (
     <div className="min-h-screen" style={{ background: '#fffbf5' }}>
       {phase === 'landing' && (
         <Landing
           email={email}
           setEmail={setEmail}
-          onStart={() => setPhase('record')}
+          restoring={restoring}
+          onStart={onStart}
         />
       )}
       {phase === 'record' && (

@@ -69,9 +69,23 @@ TMP = ROOT / "tmp"
 REC_DIR = TMP / "recordings"
 TTS_DIR = TMP / "tts"
 FEEDBACK_FILE = TMP / "feedback.json"
+USERS_FILE = TMP / "users.json"
 
 for d in [REC_DIR, TTS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
+
+
+def _load_users() -> dict:
+    if USERS_FILE.exists():
+        try:
+            return json.loads(USERS_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_users(users: dict):
+    USERS_FILE.write_text(json.dumps(users, indent=2))
 
 app = FastAPI(title="Kidly Voice")
 app.add_middleware(
@@ -487,6 +501,11 @@ class SpeakRequest(BaseModel):
     story_key: str
 
 
+class SaveUserRequest(BaseModel):
+    email: str
+    voice_id: str
+
+
 class FeedbackRequest(BaseModel):
     email: Optional[str] = None
     message: Optional[str] = None
@@ -571,7 +590,14 @@ async def clone_voice(req: CloneRequest):
                 raise HTTPException(400, "Recording too short — please record at least 60 seconds of clear audio and try again.")
             raise HTTPException(r.status_code, r.text)
 
-        return {"voice_id": r.json()["voice_id"]}
+        voice_id = r.json()["voice_id"]
+
+    # Recordings are only needed for the clone call — delete them to save disk space.
+    import shutil
+    if session_dir.exists():
+        shutil.rmtree(session_dir, ignore_errors=True)
+
+    return {"voice_id": voice_id}
 
 
 @app.post("/api/voice/preview")
@@ -734,6 +760,26 @@ async def get_audio(filename: str):
     return FileResponse(str(path), media_type="audio/mpeg")
 
 
+@app.post("/api/user/save")
+async def save_user(req: SaveUserRequest):
+    email = req.email.lower().strip()
+    if not email or not req.voice_id:
+        raise HTTPException(400, "email and voice_id are required")
+    users = _load_users()
+    users[email] = {
+        "voice_id": req.voice_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_users(users)
+    return {"ok": True}
+
+
+@app.get("/api/user/lookup")
+async def lookup_user(email: str):
+    entry = _load_users().get(email.lower().strip())
+    return {"voice_id": entry["voice_id"] if entry else None}
+
+
 @app.post("/api/feedback")
 async def save_feedback(req: FeedbackRequest):
     existing: list = []
@@ -820,3 +866,10 @@ async def delete_all_cloned_voices():
             )
 
         return {"deleted": deleted, "failed": failed, "total_deleted": len(deleted)}
+
+
+# Serve the React build — must be last so /api/* routes take priority.
+_static_dir = ROOT / "frontend" / "dist"
+if _static_dir.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="static")

@@ -66,6 +66,15 @@ export default function CloningPhase({ sessionId, recordings, email, onVoiceRead
       }
       const { voice_id } = await r.json()
 
+      // Persist email → voice_id server-side so the user can restore from any device.
+      if (email) {
+        fetch('/api/user/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, voice_id }),
+        }).catch(() => {})
+      }
+
       setVoiceId(voice_id)
       setStepIdx(2)
     } catch (e) {

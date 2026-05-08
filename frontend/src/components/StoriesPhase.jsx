@@ -7,6 +7,7 @@ import { STORIES } from '../data/stories'
 export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voiceJustCreated, onToastDismissed }) {
   const [viewMode, setViewMode] = useState('grid')
   const [playedKeys, setPlayedKeys] = useState(new Set())
+  const [audioCache, setAudioCache] = useState({})       // story.key → { audioUrl, alignment, text }
   const [loadingKey, setLoadingKey] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [readerState, setReaderState] = useState(null)   // { title, text, audioUrl, alignment }
@@ -24,6 +25,7 @@ export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voi
   // Reset per-voice state when the voice changes (e.g. after re-recording)
   useEffect(() => {
     setPlayedKeys(new Set())
+    setAudioCache({})
     setReaderState(null)
     setLoadError('')
   }, [voiceId])
@@ -38,6 +40,13 @@ export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voi
 
   const handlePlayClick = async (story) => {
     if (!voiceId) { setLoadError('No voice found — please re-record.'); return }
+
+    // Serve from in-session cache — no network call needed.
+    if (audioCache[story.key]) {
+      setReaderState({ title: story.title, ...audioCache[story.key] })
+      return
+    }
+
     setLoadingKey(story.key)
     setLoadError('')
     try {
@@ -51,8 +60,10 @@ export default function StoriesPhase({ voiceId, email, setEmail, onReRecord, voi
         throw new Error(j.detail || 'Failed to load story')
       }
       const { audio_url, alignment, story_text } = await r.json()
+      const entry = { audioUrl: audio_url, alignment, text: story_text }
+      setAudioCache(prev => ({ ...prev, [story.key]: entry }))
       setPlayedKeys(prev => new Set([...prev, story.key]))
-      setReaderState({ title: story.title, text: story_text, audioUrl: audio_url, alignment })
+      setReaderState({ title: story.title, ...entry })
     } catch (e) {
       setLoadError(e.message)
     } finally {
