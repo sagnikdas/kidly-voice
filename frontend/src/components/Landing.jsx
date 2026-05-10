@@ -1,86 +1,71 @@
 export default function Landing({ email, setEmail, onStart, restoring }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16">
-      {/* Hero */}
-      <div className="text-center max-w-xl w-full">
-        <div className="text-7xl mb-6 select-none">🌙</div>
-        <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-4 leading-tight">
-          Hear bedtime stories<br />
-          <span className="text-orange-500">in your own voice</span>
-        </h1>
-        <p className="text-lg text-gray-500 mb-10 leading-relaxed">
-          Record your voice once. Kidly narrates 15 beautiful children's stories
-          in your words — so your little one hears <em>you</em>, even when you're not there.
-        </p>
-
-        {/* Email input */}
-        <div className="mb-4">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && onStart()}
-            placeholder="Your email (optional — to save your voice)"
-            className="w-full px-5 py-3 rounded-2xl border-2 border-amber-200 focus:border-orange-400 outline-none text-gray-700 bg-white text-base"
-          />
-          <p className="text-xs text-gray-400 mt-1.5 text-left pl-1">
-            Enter your email to restore your voice model when you come back later
-          </p>
-        </div>
-
-        {/* CTA */}
-        <button
-          onClick={onStart}
-          disabled={restoring}
-          className="w-full py-4 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white text-lg font-semibold rounded-2xl transition-colors shadow-lg shadow-orange-100 flex items-center justify-center gap-2"
-        >
-          {restoring ? (
-            <>
-              <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Restoring your voice…
-            </>
-          ) : (
-            'Get started — it\'s free →'
-          )}
-        </button>
-
-        {/* Trust signals */}
-        <div className="flex items-center justify-center gap-6 mt-8 text-sm text-gray-400 flex-wrap">
-          <span>✓ No password needed</span>
-          <span>✓ Takes 2 minutes</span>
-          <span>✓ 15 stories ready</span>
-        </div>
-      </div>
-
-      {/* Feature cards */}
-      <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-2xl w-full">
-        {[
-          {
-            icon: '🎙️',
-            title: 'Record once',
-            desc: 'Read a short passage aloud — 30 seconds is all it takes to clone your voice.',
-          },
-          {
-            icon: '✨',
-            title: 'Instant magic',
-            desc: 'AI voice technology creates a private voice model that sounds just like you — ready in under a minute.',
-          },
-          {
-            icon: '📖',
-            title: '15 stories',
-            desc: 'Pick any story and hear it in your voice. Replays are instant and free.',
-          },
-        ].map((f) => (
-          <div
-            key={f.title}
-            className="bg-white rounded-2xl p-6 text-center border border-amber-100 shadow-sm"
-          >
-            <div className="text-3xl mb-3">{f.icon}</div>
-            <h3 className="font-semibold text-gray-800 mb-2">{f.title}</h3>
-            <p className="text-sm text-gray-500 leading-relaxed">{f.desc}</p>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 md:p-8">
+      <main className="flex flex-col md:flex-row w-full max-w-[900px] min-h-[540px] overflow-hidden rounded-[2rem] bg-surface-container-low shadow-2xl">
+        {/* Left panel — decorative */}
+        <div className="relative w-full md:w-1/2 min-h-[220px] md:min-h-full bg-gradient-to-br from-surface to-surface-container-high flex flex-col items-center justify-center overflow-hidden">
+          <div className="text-center select-none">
+            <div className="text-[100px] leading-none mb-2">🔥</div>
+            <div className="text-5xl">⭐ 🦉 ✨</div>
           </div>
-        ))}
-      </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-background/60 to-transparent pointer-events-none" />
+          <div className="absolute bottom-5 left-5 flex items-center gap-2 text-primary-container">
+            <span className="material-symbols-outlined ms-fill text-lg">auto_awesome</span>
+            <span className="text-xs font-bold uppercase tracking-widest">Magic Awaits</span>
+          </div>
+        </div>
+
+        {/* Right panel — form */}
+        <div className="w-full md:w-1/2 flex flex-col items-center justify-center p-8 md:p-10 bg-surface">
+          {/* Logo */}
+          <div className="flex flex-col items-center gap-2 mb-8">
+            <div className="p-3 rounded-full bg-primary-container" style={{ boxShadow: '0 0 15px rgba(255,214,0,0.4)' }}>
+              <span className="material-symbols-outlined ms-fill text-on-primary-container" style={{ fontSize: 40 }}>fireplace</span>
+            </div>
+            <h1 className="text-3xl font-bold text-primary-container tracking-tight">Kidly</h1>
+          </div>
+
+          <div className="w-full max-w-[340px] flex flex-col items-center text-center">
+            <h2 className="text-xl font-semibold text-on-surface mb-2">Welcome, Storyteller</h2>
+            <p className="text-sm text-on-surface-variant mb-8 leading-relaxed">
+              Record your voice once. Kidly narrates 15 bedtime stories so your child hears <em>you</em>.
+            </p>
+
+            <div className="w-full mb-3">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && onStart()}
+                placeholder="Your email (optional — saves your voice)"
+                className="w-full px-5 py-3.5 rounded-full bg-surface-container border border-outline-variant text-on-surface placeholder:text-on-surface-variant text-sm outline-none focus:border-primary-container transition-colors"
+              />
+              <p className="text-xs text-on-surface-variant mt-1.5 text-left pl-2">Enter email to restore your voice on any device</p>
+            </div>
+
+            <button
+              onClick={onStart}
+              disabled={restoring}
+              className="w-full py-4 bg-primary-container text-on-primary-container font-bold rounded-full transition-all glow-primary btn-3d disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {restoring ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
+                  Restoring your voice…
+                </span>
+              ) : (
+                "Get started — it's free →"
+              )}
+            </button>
+
+            <div className="flex items-center justify-center gap-4 mt-6 text-xs text-on-surface-variant flex-wrap">
+              <span className="flex items-center gap-1"><span className="text-secondary">✓</span> No password</span>
+              <span className="flex items-center gap-1"><span className="text-secondary">✓</span> 2 minutes</span>
+              <span className="flex items-center gap-1"><span className="text-secondary">✓</span> 15 stories</span>
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   )
 }

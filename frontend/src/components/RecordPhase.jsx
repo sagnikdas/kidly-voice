@@ -17,24 +17,17 @@ function fmt(s) {
 }
 
 function ProgressBar({ step }) {
-  const steps = ['Record', 'Clone', 'Stories']
+  const steps = ['Record', 'Create Voice', 'Stories']
   return (
-    <div className="flex items-center gap-2 mb-8">
+    <div className="flex gap-2 w-full max-w-[300px]">
       {steps.map((label, i) => (
-        <div key={label} className="flex items-center gap-2">
-          <div className={`flex items-center gap-1.5 text-sm font-medium ${
-            i === step ? 'text-orange-500' : i < step ? 'text-green-500' : 'text-gray-300'
-          }`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-              i < step ? 'bg-green-500 text-white' : i === step ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-400'
-            }`}>
-              {i < step ? '✓' : i + 1}
-            </span>
-            {label}
-          </div>
-          {i < steps.length - 1 && (
-            <div className={`w-6 h-0.5 ${i < step ? 'bg-green-400' : 'bg-gray-200'}`} />
-          )}
+        <div key={label} className="flex flex-col items-center gap-1 flex-1">
+          <div className={`h-2.5 w-full rounded-full transition-colors ${
+            i < step ? 'bg-secondary-fixed' : i === step ? 'bg-primary-container' : 'bg-surface-container-highest'
+          }`} />
+          <span className={`text-[10px] font-bold uppercase tracking-wider ${
+            i === step ? 'text-primary-container' : i < step ? 'text-secondary-fixed' : 'text-on-surface-variant'
+          }`}>{label}</span>
         </div>
       ))}
     </div>
@@ -188,53 +181,58 @@ function RecordLive({ onReady }) {
   const hasEnough   = durationSec >= 30
 
   return (
-    <div className="space-y-6">
+    <div className="w-full space-y-5">
 
       {/* Microphone blocked — detected before click */}
       {micBlocked && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700 text-sm leading-relaxed">
+        <div className="bg-error-container/20 border border-error/30 rounded-xl px-4 py-3 text-error text-sm leading-relaxed">
           Microphone is blocked for this site. Click the 🔒 icon in your browser's address bar, set Microphone to "Allow", then refresh the page.
         </div>
       )}
 
       {/* Microphone error — detected after click */}
       {err && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700 text-sm leading-relaxed">
+        <div className="bg-error-container/20 border border-error/30 rounded-xl px-4 py-3 text-error text-sm leading-relaxed">
           {err}
         </div>
       )}
 
       {/* Reading passage — always visible */}
-      <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm max-h-60 overflow-y-auto">
-        <p className="text-xs text-gray-400 mb-3 font-medium tracking-wide uppercase">Read this aloud ↕ scroll for more</p>
-        <p className="text-gray-700 leading-9 whitespace-pre-line text-[15px]" style={{ fontFamily: 'Georgia, serif' }}>
-          {SAMPLE_TEXT}
-        </p>
+      <div className="w-full bg-surface-container-high rounded-xl p-5 relative overflow-hidden border border-outline-variant/20">
+        <div className="absolute top-0 left-0 w-1.5 h-full bg-primary-container rounded-l-xl" />
+        <div className="pl-4">
+          <div className="flex justify-between items-center mb-3">
+            <span className="text-xs font-bold text-on-surface-variant uppercase tracking-widest">Read Aloud</span>
+            <span className="material-symbols-outlined ms-fill text-secondary text-xl">auto_stories</span>
+          </div>
+          <div className="max-h-52 overflow-y-auto no-scrollbar">
+            <p className="text-on-surface leading-9 whitespace-pre-line text-[15px] italic font-medium">{SAMPLE_TEXT}</p>
+          </div>
+          <div className="flex items-center gap-2 mt-3 text-secondary-fixed text-sm">
+            <span className="material-symbols-outlined text-sm">info</span>
+            <span className="text-xs text-on-surface-variant">Speak naturally, like reading a bedtime story</span>
+          </div>
+        </div>
       </div>
 
       {/* ── Phase: idle ── */}
       {phase === 'idle' && (
-        <div className="text-center py-2">
+        <div className="text-center py-4">
           {starting ? (
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-3 px-8 py-3.5 bg-gray-100 rounded-full text-gray-600 font-semibold text-base">
-                <span className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-                Waiting for microphone…
+            <div className="space-y-3">
+              <div className="w-24 h-24 rounded-full bg-surface-container-highest flex items-center justify-center mx-auto animate-pulse">
+                <span className="material-symbols-outlined text-on-surface-variant" style={{fontSize:48}}>mic</span>
               </div>
-              <p className="text-xs text-amber-600 font-medium">
-                Check your browser's address bar — it may be asking for microphone permission.
-              </p>
+              <p className="text-sm text-on-surface-variant">Waiting for microphone…</p>
+              <p className="text-xs text-primary-fixed">Check your browser for a permission prompt.</p>
             </div>
           ) : (
             <>
-              <button
-                onClick={startRec}
-                className="inline-flex items-center gap-3 px-10 py-3.5 bg-red-500 hover:bg-red-600 text-white rounded-full font-semibold text-base transition-colors shadow-md shadow-red-100"
-              >
-                <span className="w-3 h-3 bg-white rounded-full" />
-                Start Recording
+              <button onClick={startRec} className="w-24 h-24 rounded-full bg-primary-container flex items-center justify-center mx-auto btn-3d-sm glow-primary">
+                <span className="material-symbols-outlined ms-fill text-on-primary-container" style={{fontSize:48}}>mic</span>
               </button>
-              <p className="text-xs text-gray-400 mt-3">Read the passage above naturally — aim for 30–60 seconds</p>
+              <p className="text-primary-fixed font-semibold mt-4 text-lg">Tap to Record</p>
+              <p className="text-xs text-on-surface-variant mt-2">Read the passage above naturally — aim for 30–60 seconds</p>
             </>
           )}
         </div>
@@ -243,131 +241,63 @@ function RecordLive({ onReady }) {
       {/* ── Phase: recording ── */}
       {phase === 'recording' && (
         <div className="text-center space-y-4">
-          <div className="inline-flex items-center gap-3 bg-red-50 border border-red-100 px-8 py-3 rounded-full">
-            <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-            <span className="font-mono text-2xl font-semibold text-gray-800 tabular-nums">{fmt(timer)}</span>
-            {timer >= 30 && (
-              <span className="text-green-600 text-xs font-bold bg-green-50 px-2 py-0.5 rounded-full">✓ enough</span>
-            )}
+          {/* Timer */}
+          <div className="inline-flex items-center gap-3 bg-surface-container-high border border-outline-variant/30 px-8 py-3 rounded-full">
+            <span className="w-3 h-3 bg-error rounded-full animate-pulse" />
+            <span className="font-mono text-2xl font-bold text-on-surface tabular-nums">{fmt(timer)}</span>
+            {timer >= 30 && <span className="text-xs font-bold text-secondary-fixed bg-secondary-container/30 px-2 py-0.5 rounded-full">✓ enough</span>}
           </div>
-
-          {/* Live mic level meter */}
-          <div className="flex items-center justify-center gap-1.5">
-            {Array.from({ length: 12 }).map((_, i) => {
-              const threshold = (i / 12) * 100
-              const active = micLevel > threshold
+          {/* Waveform bars */}
+          <div className="flex items-center justify-center gap-1.5 h-16">
+            {Array.from({length:11}).map((_,i) => {
+              const base = 12 + i * 3
+              const active = micLevel > (i/11)*100
               return (
-                <div
-                  key={i}
-                  className="w-2 rounded-sm transition-all duration-75"
-                  style={{
-                    height: 8 + i * 2,
-                    backgroundColor: active
-                      ? (micLevel < 30 ? '#f97316' : micLevel < 70 ? '#22c55e' : '#22c55e')
-                      : '#e5e7eb',
-                  }}
-                />
+                <div key={i} className="w-2 rounded-full transition-all duration-75"
+                  style={{ height: active ? Math.max(base, (micLevel/100)*56) : base,
+                    backgroundColor: active ? '#ffd600' : '#393528' }} />
               )
             })}
           </div>
-          {micLevel < 5 && (
-            <p className="text-xs text-red-500 font-medium">
-              ⚠️ No mic signal detected — check System Settings → Sound → Input
-            </p>
-          )}
-
-          <div>
-            <button
-              onClick={stopRec}
-              className="px-8 py-2.5 bg-gray-800 hover:bg-gray-900 text-white rounded-full font-semibold transition-colors"
-            >
-              Stop Recording
-            </button>
-          </div>
-          <p className="text-xs text-gray-400">Recording… keep going until you've read the whole passage</p>
+          {micLevel < 5 && <p className="text-xs text-error">⚠️ No mic signal — check System Settings → Sound → Input</p>}
+          <button onClick={stopRec} className="px-8 py-3 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded-full font-semibold transition-colors border border-outline-variant/30">
+            Stop Recording
+          </button>
         </div>
       )}
 
       {/* ── Phase: review ── */}
       {phase === 'review' && take && (
-        <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-
-          {/* Header */}
-          <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-50">
+        <div className="w-full bg-surface-container-high rounded-xl overflow-hidden border border-outline-variant/20">
+          <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-outline-variant/20">
             <div>
-              <h3 className="font-semibold text-gray-800">Your recording</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Play it back — make sure your voice is clear</p>
+              <h3 className="font-semibold text-on-surface">Your recording</h3>
+              <p className="text-xs text-on-surface-variant mt-0.5">Play it back — make sure your voice is clear</p>
             </div>
-            <button
-              onClick={reRecord}
-              className="text-xs text-gray-400 hover:text-red-500 underline underline-offset-2 transition-colors shrink-0 ml-4"
-            >
-              ↺ Re-record
-            </button>
+            <button onClick={reRecord} className="text-xs text-on-surface-variant hover:text-error underline underline-offset-2 transition-colors">↺ Re-record</button>
           </div>
-
           <div className="px-5 py-4 space-y-4">
-            {/* Audio player */}
-            <audio
-              controls
-              src={take.url}
-              className="w-full"
-              style={{ height: 40 }}
-            />
-
-            {/* Silent warning */}
-            {take.isSilent && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm leading-relaxed">
-                ⚠️ This recording appears to have very little audio data. Try re-recording — if the problem persists, increase your microphone input level in System Settings → Sound → Input, or switch to Chrome.
-              </div>
-            )}
-
-            {/* Duration status */}
-            <div className={`flex items-center gap-2 text-sm font-medium ${hasEnough ? 'text-green-600' : 'text-amber-600'}`}>
-              {hasEnough ? (
-                <>
-                  <span className="w-4 h-4 bg-green-500 text-white rounded-full flex items-center justify-center text-xs">✓</span>
-                  {durationSec.toFixed(0)}s — good length!
-                </>
-              ) : (
-                <>
-                  <span className="w-4 h-4 bg-amber-400 text-white rounded-full flex items-center justify-center text-xs">!</span>
-                  {durationSec.toFixed(0)}s — need {Math.ceil(30 - durationSec)}s more for a good voice clone
-                </>
-              )}
+            <audio controls src={take.url} className="w-full" style={{height:40}} />
+            {take.isSilent && <div className="bg-error-container/20 border border-error/30 rounded-xl px-4 py-3 text-error text-sm">⚠️ Very little audio — try re-recording with microphone level increased.</div>}
+            <div className={`flex items-center gap-2 text-sm font-medium ${hasEnough ? 'text-secondary-fixed' : 'text-primary-fixed'}`}>
+              {hasEnough ? <>
+                <span className="w-5 h-5 bg-secondary-container rounded-full flex items-center justify-center text-xs text-on-secondary-container">✓</span>
+                {durationSec.toFixed(0)}s — good length!
+              </> : <>
+                <span className="w-5 h-5 bg-primary-container rounded-full flex items-center justify-center text-xs text-on-primary-container">!</span>
+                {durationSec.toFixed(0)}s — need {Math.ceil(30 - durationSec)}s more
+              </>}
             </div>
-
-            {/* Confirmation + upload — only when long enough */}
-            {hasEnough ? (
-              <>
-                <label className="flex items-start gap-3 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={confirmed}
-                    onChange={e => setConfirmed(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 accent-orange-500 shrink-0"
-                  />
-                  <span className="text-sm text-gray-600 leading-snug">
-                    I've listened back and my voice sounds clear — no excessive background noise
-                  </span>
-                </label>
-
-                <button
-                  onClick={() => onReady([take])}
-                  disabled={!confirmed}
-                  className="w-full py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-semibold transition-colors"
-                >
-                  Upload & Continue →
-                </button>
-              </>
-            ) : (
-              /* Too short — prompt to re-record */
-              <button
-                onClick={reRecord}
-                className="w-full py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-2xl font-semibold transition-colors"
-              >
-                Re-record — read the full passage
+            {hasEnough ? (<>
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} className="mt-0.5 w-4 h-4 accent-primary-container shrink-0" />
+                <span className="text-sm text-on-surface-variant leading-snug">I've listened back and my voice sounds clear — no excessive background noise</span>
+              </label>
+              <button onClick={() => onReady([take])} disabled={!confirmed} className="w-full py-3.5 bg-primary-container text-on-primary-container rounded-full font-bold transition-all btn-3d disabled:opacity-40 disabled:cursor-not-allowed glow-primary">
+                Upload & Continue →
               </button>
+            </>) : (
+              <button onClick={reRecord} className="w-full py-3.5 bg-surface-container-highest text-on-surface rounded-full font-semibold transition-colors">Re-record — read the full passage</button>
             )}
           </div>
         </div>
@@ -436,11 +366,11 @@ function UploadFiles({ onReady }) {
   }))
 
   return (
-    <div className="space-y-4">
+    <div className="w-full space-y-4">
 
       <label
-        className={`block border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-colors ${
-          dragging ? 'border-orange-500 bg-orange-50' : 'border-orange-200 hover:border-orange-400 hover:bg-orange-50'
+        className={`block border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
+          dragging ? 'border-primary-container bg-primary-container/10' : 'border-outline-variant hover:border-primary-container/50 hover:bg-surface-container-high'
         }`}
         onDragOver={e => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
@@ -448,12 +378,12 @@ function UploadFiles({ onReady }) {
       >
         <input type="file" accept="audio/*" multiple className="hidden" onChange={e => addFiles(e.target.files)} />
         <div className="text-4xl mb-2">📂</div>
-        <p className="text-gray-700 font-semibold">Drop audio files here</p>
-        <p className="text-gray-400 text-sm mt-1">or click to browse — mp3 · m4a · wav · webm · ogg</p>
+        <p className="text-on-surface font-semibold">Drop audio files here</p>
+        <p className="text-on-surface-variant text-sm mt-1">or click to browse — mp3 · m4a · wav · webm</p>
       </label>
 
       {hasSilent && (
-        <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 text-amber-800 text-sm">
+        <div className="bg-error-container/20 border border-error/30 rounded-xl px-4 py-3 text-error text-sm">
           ⚠️ One or more files appear very quiet. Play them back to confirm your voice is clearly audible.
         </div>
       )}
@@ -462,23 +392,23 @@ function UploadFiles({ onReady }) {
         <div className="space-y-2">
           {files.map((f, i) => (
             <div key={i} className={`flex items-center gap-3 rounded-xl px-4 py-2 border ${
-              f.isSilent ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-100'
+              f.isSilent ? 'bg-error-container/10 border-error/20' : 'bg-surface-container-high border-outline-variant/20'
             }`}>
               <audio controls src={f.url} className="flex-1 h-8" style={{ minWidth: 0 }} />
-              <span className="text-xs text-gray-400 shrink-0">
+              <span className="text-xs text-on-surface-variant shrink-0">
                 {f.durationMs ? `${(f.durationMs / 1000).toFixed(1)}s` : '?'}
               </span>
-              {f.isSilent && <span className="text-xs text-amber-600 shrink-0">quiet</span>}
-              <button onClick={() => removeFile(i)} className="text-gray-300 hover:text-red-400 shrink-0">✕</button>
+              {f.isSilent && <span className="text-xs text-error shrink-0">quiet</span>}
+              <button onClick={() => removeFile(i)} className="text-on-surface-variant hover:text-error shrink-0">✕</button>
             </div>
           ))}
 
           {allUnknown ? (
-            <p className="text-sm font-medium text-amber-600">
+            <p className="text-sm font-medium text-primary-fixed">
               ⚠️ Couldn't detect audio length — please make sure your recording is at least 30 seconds.
             </p>
           ) : (
-            <p className={`text-sm font-medium ${hasEnough ? 'text-green-600' : 'text-amber-600'}`}>
+            <p className={`text-sm font-medium ${hasEnough ? 'text-secondary-fixed' : 'text-primary-fixed'}`}>
               Total: {knownSec.toFixed(0)}s
               {hasEnough ? ' ✓ Ready!' : ` — need ${Math.ceil(30 - knownSec)}s more`}
             </p>
@@ -487,7 +417,7 @@ function UploadFiles({ onReady }) {
           <button
             onClick={() => onReady(fakeTakes)}
             disabled={!hasEnough}
-            className="w-full py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-2xl font-semibold transition-colors"
+            className="w-full py-3.5 bg-primary-container text-on-primary-container rounded-full font-bold transition-all btn-3d disabled:opacity-40 disabled:cursor-not-allowed glow-primary"
           >
             Upload & Continue →
           </button>
@@ -504,33 +434,45 @@ export default function RecordPhase({ sessionId, onBack, onRecordingsReady }) {
   const [mode, setMode] = useState('record')
 
   return (
-    <div className="min-h-screen px-4 py-10">
-      <div className="max-w-2xl mx-auto">
-        <ProgressBar step={0} />
+    <div className="min-h-screen bg-background text-on-surface">
+      {/* Header */}
+      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-14 bg-surface border-b border-outline-variant/20">
+        <div className="flex items-center gap-2">
+          <button onClick={onBack} className="text-on-surface-variant hover:text-on-surface transition-colors">
+            <span className="material-symbols-outlined">arrow_back_ios_new</span>
+          </button>
+          <h1 className="text-lg font-bold text-primary-container">Kidly</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="material-symbols-outlined text-on-surface-variant">lock</span>
+          <span className="material-symbols-outlined text-on-surface-variant">settings</span>
+        </div>
+      </header>
 
-        <button onClick={onBack} className="text-sm text-gray-400 hover:text-gray-600 mb-6 flex items-center gap-1">
-          ← Back
-        </button>
-
-        <h2 className="text-2xl font-bold text-gray-800 mb-1">Record your voice</h2>
-        <p className="text-gray-500 text-sm mb-6">
-          Read the passage aloud naturally. Aim for 30–60 seconds — the more the better.
-        </p>
+      <main className="pt-20 pb-24 px-6 max-w-[680px] mx-auto flex flex-col items-center">
+        {/* Step indicator */}
+        <div className="w-full flex flex-col items-center gap-2 mb-8">
+          <span className="text-xs font-bold text-secondary-fixed uppercase tracking-widest">Step 1 of 3</span>
+          <ProgressBar step={0} />
+          <h2 className="text-xl font-semibold text-on-surface mt-1">
+            {mode === 'record' ? 'Record Your Voice' : 'Upload Audio'}
+          </h2>
+        </div>
 
         {/* Tab switcher */}
-        <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
+        <div className="w-full flex bg-surface-container-high rounded-xl p-1 mb-6 gap-1">
           <button
             onClick={() => setMode('record')}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-              mode === 'record' ? 'bg-white shadow text-gray-800' : 'text-gray-400 hover:text-gray-600'
+            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+              mode === 'record' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
             🎙 Record Live
           </button>
           <button
             onClick={() => setMode('upload')}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-              mode === 'upload' ? 'bg-white shadow text-gray-800' : 'text-gray-400 hover:text-gray-600'
+            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+              mode === 'upload' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
             📁 Upload File
@@ -539,7 +481,7 @@ export default function RecordPhase({ sessionId, onBack, onRecordingsReady }) {
 
         {mode === 'record' && <RecordLive onReady={onRecordingsReady} />}
         {mode === 'upload' && <UploadFiles onReady={onRecordingsReady} />}
-      </div>
+      </main>
     </div>
   )
 }

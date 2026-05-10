@@ -1,6 +1,77 @@
 @import "tailwindcss";
 
-body {
-  background: #fffbf5;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+@theme {
+  --font-sans: 'Quicksand', system-ui, sans-serif;
+
+  --color-background: #161309;
+  --color-surface: #161309;
+  --color-surface-dim: #161309;
+  --color-surface-bright: #3d392c;
+  --color-surface-container: #231f14;
+  --color-surface-container-high: #2e2a1e;
+  --color-surface-container-highest: #393528;
+  --color-surface-container-low: #1f1b10;
+  --color-surface-container-lowest: #110e05;
+  --color-on-surface: #eae2cf;
+  --color-on-surface-variant: #d0c6ab;
+  --color-outline: #999077;
+  --color-outline-variant: #4d4632;
+  --color-surface-tint: #e9c400;
+
+  --color-primary: #fff5dc;
+  --color-primary-container: #ffd600;
+  --color-on-primary: #3a3000;
+  --color-on-primary-container: #705d00;
+  --color-primary-fixed: #ffe170;
+  --color-primary-fixed-dim: #e9c400;
+
+  --color-secondary: #7fd6c3;
+  --color-secondary-container: #007061;
+  --color-on-secondary: #00382f;
+  --color-on-secondary-container: #99f1dd;
+  --color-secondary-fixed: #9bf3df;
+  --color-secondary-fixed-dim: #7fd6c3;
+
+  --color-tertiary: #d8fcff;
+  --color-tertiary-container: #00f0fc;
+  --color-on-tertiary: #00373a;
+  --color-on-tertiary-container: #00696f;
+  --color-tertiary-fixed-dim: #00dce7;
+
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+
+  --radius-sm: 0.5rem;
+  --radius-DEFAULT: 1rem;
+  --radius-md: 1.5rem;
+  --radius-lg: 2rem;
+  --radius-xl: 3rem;
+  --radius-full: 9999px;
 }
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-size: 24px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.ms-fill {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+body {
+  background: #161309;
+  color: #eae2cf;
+  font-family: 'Quicksand', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.glow-primary { box-shadow: 0 0 20px rgba(255,214,0,0.3); }
+.btn-3d { box-shadow: 0 4px 0 0 #b39a00; }
+.btn-3d:active { transform: translateY(2px); box-shadow: none; }
+.btn-3d-sm { box-shadow: 0 3px 0 0 #544600; }
+.btn-3d-sm:active { transform: translateY(2px); box-shadow: none; }

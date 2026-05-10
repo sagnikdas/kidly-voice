@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import asyncio
 import hashlib
 import tomllib
 import logging
@@ -567,6 +568,50 @@ STORIES: dict[str, dict] = {
 }
 
 
+# In-memory preload state: voice_id → {total, ready, failed, done}
+_preload_state: dict[str, dict] = {}
+_PRELOAD_CONCURRENCY = 4
+
+
+async def _preload_stories_bg(voice_id: str) -> None:
+    """Generate TTS for all stories in the background, throttled to _PRELOAD_CONCURRENCY."""
+    state = _preload_state[voice_id]
+    sem = asyncio.Semaphore(_PRELOAD_CONCURRENCY)
+
+    async def _one(story_key: str) -> None:
+        cache_key = hashlib.sha256(
+            f"ts:{voice_id}:{story_key}:fa:mp3:{FA_TTS_BITRATE}".encode()
+        ).hexdigest()[:20]
+        audio_path = TTS_DIR / f"{cache_key}.mp3"
+        if audio_path.exists():
+            state["ready"] += 1
+            return
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    r = await client.post(
+                        "https://api.fish.audio/v1/tts",
+                        headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
+                        json={
+                            "text": STORIES[story_key]["content"],
+                            "reference_id": voice_id,
+                            "format": "mp3",
+                            "mp3_bitrate": FA_TTS_BITRATE,
+                            "latency": "normal",
+                        },
+                    )
+                if r.status_code < 400:
+                    audio_path.write_bytes(r.content)
+                    state["ready"] += 1
+                else:
+                    state["failed"] += 1
+            except Exception:
+                state["failed"] += 1
+
+    await asyncio.gather(*[_one(k) for k in STORIES])
+    state["done"] = True
+
+
 class CloneRequest(BaseModel):
     session_id: str
     label: str = "My Kidly Voice"
@@ -603,6 +648,11 @@ class SpeakTimestampedRequest(BaseModel):
 class CustomSpeakRequest(BaseModel):
     voice_id: str
     text: str
+    session_token: str
+
+
+class PreloadRequest(BaseModel):
+    voice_id: str
     session_token: str
 
 
@@ -819,6 +869,39 @@ async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
         "story_text": story["content"],
         "from_cache": False,
     }
+
+
+@app.post("/api/stories/preload")
+@limiter.limit("10/hour")
+async def preload_stories(request: Request, req: PreloadRequest):
+    """Kick off background TTS generation for all stories. Returns 202 immediately."""
+    _validate_session(req.voice_id, req.session_token)
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set in .env")
+    # Skip if already running or done for this voice.
+    existing = _preload_state.get(req.voice_id)
+    if existing and (not existing["done"] or existing["ready"] == len(STORIES)):
+        return {"started": False, "status": existing}
+    _preload_state[req.voice_id] = {"total": len(STORIES), "ready": 0, "failed": 0, "done": False}
+    asyncio.create_task(_preload_stories_bg(req.voice_id))
+    return {"started": True}
+
+
+@app.get("/api/stories/preload-status")
+async def preload_status(voice_id: str):
+    """Return how many stories have been pre-generated for this voice."""
+    total = len(STORIES)
+    state = _preload_state.get(voice_id)
+    if state is None:
+        # Returning user — count what's already on disk.
+        ready = sum(
+            1 for k in STORIES
+            if (TTS_DIR / (
+                hashlib.sha256(f"ts:{voice_id}:{k}:fa:mp3:{FA_TTS_BITRATE}".encode()).hexdigest()[:20] + ".mp3"
+            )).exists()
+        )
+        return {"total": total, "ready": ready, "failed": 0, "done": ready == total}
+    return {"total": total, "ready": state["ready"], "failed": state["failed"], "done": state["done"]}
 
 
 @app.post("/api/voice/speak-custom")

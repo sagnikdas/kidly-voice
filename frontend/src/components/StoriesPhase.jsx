@@ -4,6 +4,14 @@ import StoryReader from './StoryReader'
 import CustomTextModal from './CustomTextModal'
 import { STORIES } from '../data/stories'
 
+const CATEGORIES = ['All', '🌙 Bedtime', '⚔️ Adventure', '🐾 Animals', '✨ Heartfelt']
+const CATEGORY_MORALS = {
+  '🌙 Bedtime': ['comfort', 'love', 'gratitude'],
+  '⚔️ Adventure': ['courage', 'bravery', 'perseverance', 'responsibility'],
+  '🐾 Animals': ['kindness', 'friendship', 'helpfulness', 'empathy'],
+  '✨ Heartfelt': ['creativity', 'self-worth', 'generosity'],
+}
+
 function VoiceSelect({ value, options, onChange }) {
   const groups = options.reduce((g, v) => {
     ;(g[v.group] = g[v.group] || []).push(v)
@@ -13,7 +21,7 @@ function VoiceSelect({ value, options, onChange }) {
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      className="flex-1 text-sm border border-indigo-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none focus:border-indigo-400"
+      className="flex-1 text-sm border border-outline-variant rounded-lg px-2 py-1.5 bg-surface-container text-on-surface outline-none focus:border-primary-container"
     >
       <option value="">My cloned voice</option>
       {Object.entries(groups).map(([group, voices]) => (
@@ -28,12 +36,12 @@ function VoiceSelect({ value, options, onChange }) {
 }
 
 export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, onReRecord, voiceJustCreated, onToastDismissed }) {
-  const [viewMode, setViewMode] = useState('grid')
   const [playedKeys, setPlayedKeys] = useState(new Set())
   const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, alignment, text }
   const [loadingKey, setLoadingKey] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [readerState, setReaderState] = useState(null)   // { title, text, audioUrl, alignment }
+  const [preloadStatus, setPreloadStatus] = useState({ total: 0, ready: 0, done: false })
   const [showCustomModal, setShowCustomModal] = useState(false)
 
   // TEMP: voice picker for testing
@@ -49,13 +57,39 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
   // Toast
   const [showToast, setShowToast] = useState(voiceJustCreated)
 
+  // Category filter
+  const [activeCategory, setActiveCategory] = useState('All')
+  const filteredStories = activeCategory === 'All' ? STORIES : STORIES.filter(s => CATEGORY_MORALS[activeCategory]?.includes(s.moral))
+
   // Reset per-voice state when the voice changes (e.g. after re-recording)
   useEffect(() => {
     setPlayedKeys(new Set())
     setAudioCache({})
     setReaderState(null)
     setLoadError('')
+    setPreloadStatus({ total: 0, ready: 0, done: false })
   }, [voiceId])
+
+  // Poll preload status until all stories are ready.
+  useEffect(() => {
+    if (!voiceId || isDemo) return
+    let cancelled = false
+
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/stories/preload-status?voice_id=${voiceId}`)
+        if (!r.ok || cancelled) return
+        const data = await r.json()
+        if (!cancelled) {
+          setPreloadStatus(data)
+          if (!data.done) setTimeout(poll, 2000)
+        }
+      } catch {}
+    }
+
+    poll()
+    return () => { cancelled = true }
+  }, [voiceId, isDemo])
 
   // TEMP: load Fish Audio voice list for testing
   useEffect(() => {
@@ -169,13 +203,13 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
 
       {/* Demo mode banner */}
       {isDemo && (
-        <div className="fixed top-0 inset-x-0 z-50 bg-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-4 text-sm">
+        <div className="fixed top-0 inset-x-0 z-50 bg-secondary-container text-on-secondary-container px-4 py-3 flex items-center justify-between gap-4 text-sm">
           <span>
             <strong>Demo voice active</strong> — you're hearing a sample voice, not your own.
           </span>
           <button
             onClick={onReRecord}
-            className="shrink-0 bg-white text-indigo-700 font-semibold px-4 py-1.5 rounded-full text-xs hover:bg-indigo-50 transition-colors"
+            className="shrink-0 bg-primary-container text-on-primary-container font-semibold px-4 py-1.5 rounded-full text-xs hover:opacity-90 transition-opacity"
           >
             Record my voice →
           </button>
@@ -184,164 +218,133 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
 
       {/* Voice-ready toast */}
       {showToast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-2xl shadow-lg text-sm font-semibold">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-secondary-container text-on-secondary-container px-5 py-3 rounded-2xl shadow-lg text-sm font-semibold">
           <span>🎉 Your voice is ready! Pick a story below.</span>
-          <button onClick={dismissToast} className="text-green-200 hover:text-white ml-1">✕</button>
+          <button onClick={dismissToast} className="hover:text-on-surface ml-1">✕</button>
         </div>
       )}
 
-      <div className={`min-h-screen px-4 py-10 ${isDemo ? 'pt-20' : ''}`}>
-        <div className="max-w-4xl mx-auto">
-
-          {/* Header */}
-          <div className="flex items-start justify-between mb-6">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-800">Choose a story 🌙</h2>
-              <p className="text-gray-500 text-sm mt-1">
-                Tap any story to read it in your cloned voice with word-by-word highlighting.
-              </p>
+      <div className={`min-h-screen bg-background text-on-surface pb-32 ${isDemo ? 'pt-16' : ''}`}>
+        {/* Top bar */}
+        <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-14 bg-surface border-b border-outline-variant/20" style={{top: isDemo ? 48 : 0}}>
+          <span className="text-lg font-bold text-primary-container">Kidly</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container-high rounded-full border border-outline-variant/30">
+              <span className="material-symbols-outlined ms-fill text-primary-container text-base">lock</span>
+              <span className="text-xs font-bold text-on-surface">Kid-Lock</span>
             </div>
-            <button
-              onClick={onReRecord}
-              className="text-xs text-gray-400 hover:text-gray-600 underline mt-1 shrink-0 ml-4"
-            >
-              Re-record voice
-            </button>
+            <button onClick={onReRecord} className="text-xs text-on-surface-variant hover:text-on-surface underline">Re-record</button>
+          </div>
+        </header>
+
+        <main className="max-w-[800px] mx-auto px-6 pt-20">
+          {/* Mascot greeting */}
+          <div className="flex items-center gap-5 mb-6 bg-surface-container-low p-5 rounded-xl border-b-4 border-surface-container-highest">
+            <div className="text-5xl shrink-0">🦉</div>
+            <div>
+              <h1 className="text-lg font-bold text-primary-fixed mb-0.5">Hoo-hoo! Ready for a story?</h1>
+              <p className="text-sm text-on-surface-variant">Pick a magical world to start tonight's adventure!</p>
+            </div>
           </div>
 
-          {/* TEMP: voice picker for testing */}
-          {voiceOptions.length > 0 && (
-            <div className="mb-4 flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
-              <span className="text-xs font-semibold text-indigo-600 shrink-0">🧪 Test voice</span>
-              <VoiceSelect
-                value={testVoiceId}
-                options={voiceOptions}
-                onChange={v => { setTestVoiceId(v); setAudioCache({}) }}
-              />
-              {testVoiceId && (
-                <button
-                  onClick={() => { setTestVoiceId(''); setAudioCache({}) }}
-                  className="text-xs text-indigo-400 hover:text-indigo-700 shrink-0"
-                >
-                  ✕ Reset
-                </button>
-              )}
+          {/* Preload status */}
+          {preloadStatus.total > 0 && !preloadStatus.done && (
+            <div className="mb-4 flex items-center gap-2 bg-surface-container border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-secondary-fixed">
+              <span className="w-3.5 h-3.5 border-2 border-secondary-fixed border-t-transparent rounded-full animate-spin shrink-0" />
+              <span>Preparing stories… <strong>{preloadStatus.ready}/{preloadStatus.total}</strong> ready</span>
             </div>
           )}
 
           {/* Error banner */}
           {loadError && (
-            <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-700 text-sm flex items-center justify-between">
+            <div className="mb-4 bg-error-container/20 border border-error/30 rounded-xl px-4 py-3 text-error text-sm flex items-center justify-between">
               <span>{loadError}</span>
-              <button onClick={() => setLoadError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
+              <button onClick={() => setLoadError('')} className="ml-4 text-error hover:text-on-surface">✕</button>
             </div>
           )}
 
-          {/* Toolbar: view toggle */}
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-xs text-gray-400">{STORIES.length} stories</p>
-            <div className="flex bg-gray-100 rounded-lg p-0.5">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                  viewMode === 'grid' ? 'bg-white shadow text-gray-800' : 'text-gray-400 hover:text-gray-600'
-                }`}
-              >
-                ⊞ Grid
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                  viewMode === 'list' ? 'bg-white shadow text-gray-800' : 'text-gray-400 hover:text-gray-600'
-                }`}
-              >
-                ≡ List
-              </button>
+          {/* Voice picker (testing - keep same logic) */}
+          {voiceOptions.length > 0 && (
+            <div className="mb-4 flex items-center gap-3 bg-surface-container border border-outline-variant/20 rounded-xl px-4 py-3">
+              <span className="text-xs font-semibold text-secondary-fixed shrink-0">🧪 Test voice</span>
+              <VoiceSelect value={testVoiceId} options={voiceOptions} onChange={v => { setTestVoiceId(v); setAudioCache({}) }} />
+              {testVoiceId && <button onClick={() => { setTestVoiceId(''); setAudioCache({}) }} className="text-xs text-on-surface-variant hover:text-error shrink-0">✕ Reset</button>}
+            </div>
+          )}
+
+          {/* Category pills */}
+          <div className="mb-6 -mx-6 px-6 overflow-x-auto no-scrollbar">
+            <div className="flex gap-3 pb-2">
+              {CATEGORIES.map(cat => (
+                <button key={cat} onClick={() => setActiveCategory(cat)}
+                  className={`flex-shrink-0 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                    activeCategory === cat
+                      ? 'bg-primary-container text-on-primary-container btn-3d-sm'
+                      : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface border-b-4 border-surface-container-highest'
+                  }`}>
+                  {cat}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Stories */}
-          {viewMode === 'grid' ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-3">
-              {STORIES.map((story) => (
-                <StoryCard
-                  key={story.key}
-                  story={story}
-                  hasPlayed={playedKeys.has(story.key)}
-                  loading={loadingKey === story.key}
-                  onPlayClick={handlePlayClick}
-                  listMode={false}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2 mb-3">
-              {STORIES.map((story) => (
-                <StoryCard
-                  key={story.key}
-                  story={story}
-                  hasPlayed={playedKeys.has(story.key)}
-                  loading={loadingKey === story.key}
-                  onPlayClick={handlePlayClick}
-                  listMode={true}
-                />
-              ))}
-            </div>
-          )}
+          {/* Stories bento grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            {/* Featured first story */}
+            {filteredStories.length > 0 && (
+              <div className="sm:col-span-2">
+                <StoryCard story={filteredStories[0]} hasPlayed={playedKeys.has(filteredStories[0].key)} loading={loadingKey === filteredStories[0].key} onPlayClick={handlePlayClick} featured={true} />
+              </div>
+            )}
+            {/* Rest of stories */}
+            {filteredStories.slice(1).map(story => (
+              <StoryCard key={story.key} story={story} hasPlayed={playedKeys.has(story.key)} loading={loadingKey === story.key} onPlayClick={handlePlayClick} />
+            ))}
+          </div>
 
-          <p className="text-center text-xs text-gray-300 mb-12">↓ Scroll to see all stories</p>
-
-          {/* Feedback */}
+          {/* Feedback section */}
           {hasPlayed && !submitted && (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 max-w-lg mx-auto">
-              <h3 className="font-bold text-gray-800 mb-1">Love Kidly? Tell us!</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                Your feedback helps us grow. Leave your email and we'll keep you posted.
-              </p>
+            <div className="bg-surface-container border border-outline-variant/20 rounded-xl p-6 max-w-lg mx-auto mb-6">
+              <h3 className="font-bold text-on-surface mb-1">Love Kidly? Tell us! 🙏</h3>
+              <p className="text-sm text-on-surface-variant mb-4">Your feedback helps us grow.</p>
               <div className="space-y-3">
-                <input
-                  type="email"
-                  value={feedbackEmail}
-                  onChange={(e) => setFeedbackEmail(e.target.value)}
-                  placeholder="Your email address"
-                  className="w-full px-4 py-2.5 border border-amber-200 rounded-xl focus:border-orange-400 outline-none text-sm bg-white"
-                />
-                <textarea
-                  value={feedbackMsg}
-                  onChange={(e) => setFeedbackMsg(e.target.value)}
-                  placeholder="What do you love? What could be better?"
-                  rows={3}
-                  className="w-full px-4 py-2.5 border border-amber-200 rounded-xl focus:border-orange-400 outline-none text-sm resize-none bg-white"
-                />
-                <button
-                  onClick={handleSubmit}
-                  disabled={submitting || (!feedbackEmail && !feedbackMsg)}
-                  className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-semibold transition-colors"
-                >
+                <input type="email" value={feedbackEmail} onChange={e => setFeedbackEmail(e.target.value)} placeholder="Your email address" className="w-full px-4 py-2.5 border border-outline-variant rounded-xl bg-surface text-on-surface placeholder:text-on-surface-variant text-sm outline-none focus:border-primary-container" />
+                <textarea value={feedbackMsg} onChange={e => setFeedbackMsg(e.target.value)} placeholder="What do you love? What could be better?" rows={3} className="w-full px-4 py-2.5 border border-outline-variant rounded-xl bg-surface text-on-surface placeholder:text-on-surface-variant text-sm resize-none outline-none focus:border-primary-container" />
+                <button onClick={handleSubmit} disabled={submitting || (!feedbackEmail && !feedbackMsg)} className="px-6 py-2.5 bg-primary-container text-on-primary-container rounded-full text-sm font-bold btn-3d disabled:opacity-40">
                   {submitting ? 'Sending…' : 'Send feedback →'}
                 </button>
               </div>
             </div>
           )}
-
           {submitted && (
-            <div className="bg-green-50 border border-green-200 rounded-2xl p-6 text-center max-w-lg mx-auto">
+            <div className="bg-secondary-container/20 border border-secondary/20 rounded-xl p-6 text-center max-w-lg mx-auto mb-6">
               <div className="text-3xl mb-2">🙏</div>
-              <h3 className="font-bold text-gray-800">Thank you!</h3>
-              <p className="text-sm text-gray-500 mt-1">Your feedback means the world to us.</p>
+              <h3 className="font-bold text-on-surface">Thank you!</h3>
+              <p className="text-sm text-on-surface-variant mt-1">Your feedback means the world to us.</p>
             </div>
           )}
-        </div>
-      </div>
+        </main>
 
-      {/* Floating custom text button */}
-      <button
-        onClick={() => setShowCustomModal(true)}
-        className="fixed bottom-7 right-7 z-30 flex items-center gap-2 bg-gray-800 hover:bg-gray-900 text-white pl-4 pr-5 py-3 rounded-full shadow-xl font-semibold text-sm transition-colors"
-      >
-        <span className="text-base">✏️</span>
-        Custom text
-      </button>
+        {/* Bottom nav */}
+        <nav className="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pt-3 pb-8 bg-surface-container-high rounded-t-xl" style={{boxShadow: '0 -4px 20px rgba(255,214,0,0.1)'}}>
+          <div className="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-xl px-5 py-2 btn-3d-sm">
+            <span className="material-symbols-outlined ms-fill text-xl">auto_stories</span>
+            <span className="text-[10px] font-bold">Library</span>
+          </div>
+          <button onClick={() => setShowCustomModal(true)} className="flex flex-col items-center justify-center text-on-surface-variant px-4 py-2 hover:text-primary-fixed transition-colors">
+            <span className="material-symbols-outlined text-xl">magic_button</span>
+            <span className="text-[10px] font-bold">Custom</span>
+          </button>
+          <button onClick={onReRecord} className="flex flex-col items-center justify-center text-on-surface-variant px-4 py-2 hover:text-primary-fixed transition-colors">
+            <span className="material-symbols-outlined text-xl">mic</span>
+            <span className="text-[10px] font-bold">Re-record</span>
+          </button>
+          <div className="flex flex-col items-center justify-center text-on-surface-variant px-4 py-2">
+            <span className="material-symbols-outlined text-xl">space_dashboard</span>
+            <span className="text-[10px] font-bold">Dashboard</span>
+          </div>
+        </nav>
+      </div>
     </>
   )
 }

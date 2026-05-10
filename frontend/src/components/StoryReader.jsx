@@ -134,8 +134,8 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
           key={partIdx}
           ref={el => { wordRefs.current[myIdx] = el }}
           style={{
-            backgroundColor: active ? '#fef08a' : 'transparent',
-            borderRadius: active ? '3px' : undefined,
+            backgroundColor: active ? 'rgba(255,214,0,0.3)' : 'transparent',
+            borderRadius: active ? '4px' : undefined,
             padding: active ? '0 2px' : undefined,
             transition: 'background-color 0.1s',
           }}
@@ -154,92 +154,91 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
   const progress = duration ? (currentTime / duration) * 100 : 0
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#fffbf5' }}>
+    <div className="fixed inset-0 z-50 flex flex-col bg-background text-on-surface">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-amber-100 shrink-0 bg-white">
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-        >
-          ← Back
+      <header className="fixed top-0 w-full z-10 flex justify-between items-center px-5 h-14 bg-surface border-b border-outline-variant/20">
+        <button onClick={onClose} className="flex items-center gap-1 text-sm text-on-surface-variant hover:text-on-surface transition-colors">
+          <span className="material-symbols-outlined">arrow_back_ios_new</span>
+          <span className="font-medium text-primary-container">Kidly</span>
         </button>
-
-        <h2
-          className="font-bold text-gray-800 text-sm truncate mx-4 max-w-xs"
-          style={{ fontFamily: 'Georgia, serif' }}
-        >
-          {title}
-        </h2>
-
-        <button
-          onClick={() => setHighlightOn(h => !h)}
-          className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors whitespace-nowrap ${
-            highlightOn
-              ? 'bg-yellow-100 border-yellow-300 text-yellow-800'
-              : 'bg-gray-100 border-gray-200 text-gray-400'
-          }`}
-        >
-          {highlightOn ? '✦ Highlighting on' : '◇ Highlighting off'}
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-high rounded-full border border-outline-variant/30">
+          <span className="material-symbols-outlined ms-fill text-secondary text-base">record_voice_over</span>
+          <span className="text-xs font-bold text-secondary">In Your Voice</span>
+        </div>
+        <button onClick={() => setHighlightOn(h => !h)} className={`flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${highlightOn ? 'bg-primary-container/20 border-primary-container/40 text-primary-fixed' : 'bg-surface-container border-outline-variant/30 text-on-surface-variant'}`}>
+          {highlightOn ? '✦ Highlight' : '◇ Highlight'}
         </button>
-      </div>
+      </header>
 
-      {/* Story text */}
-      <div
-        className="flex-1 overflow-y-auto px-6 py-10"
-        style={{
-          fontFamily: 'Georgia, serif',
-          fontSize: '1.125rem',
-          lineHeight: 1.95,
-          color: '#374151',
-          maxWidth: 680,
-          margin: '0 auto',
-          width: '100%',
-        }}
-      >
-        {renderedText}
-        <div style={{ height: 40 }} />
-      </div>
-
-      {/* Audio controls */}
-      <div className="shrink-0 bg-white border-t border-amber-100 px-6 pt-3 pb-5">
-        <audio ref={audioRef} src={audioUrl} preload="auto" className="hidden" />
-
-        {/* Seek bar */}
-        <div
-          className="w-full h-1.5 bg-gray-200 rounded-full cursor-pointer mb-4"
-          onClick={seek}
-        >
-          <div
-            className="h-full bg-orange-400 rounded-full"
-            style={{ width: `${progress}%`, transition: 'width 0.25s linear' }}
-          />
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto pt-20 pb-36">
+        {/* Story emoji illustration */}
+        <div className="w-full max-w-[700px] mx-auto px-5 mb-6">
+          <div className="relative aspect-[4/2] rounded-xl overflow-hidden bg-gradient-to-br from-surface-container to-surface-container-highest flex items-center justify-center border-4 border-surface-container-highest">
+            <span className="text-[80px]">📖</span>
+            <div className="absolute inset-0" style={{background: 'radial-gradient(circle at center, transparent 0%, rgba(22,19,9,0.4) 100%)'}} />
+          </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-xs text-gray-400 font-mono w-10">{fmt(currentTime)}</span>
+        {/* Story title and text */}
+        <div className="w-full max-w-[700px] mx-auto px-5 text-center mb-6">
+          <h1 className="text-2xl font-bold text-primary-fixed mb-4">{title}</h1>
+          {/* Highlighted text */}
+          <div className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 text-left"
+            style={{ fontFamily: "'Quicksand', sans-serif", fontSize: '1.1rem', lineHeight: 2, color: '#eae2cf' }}>
+            {renderedText}
+            <div style={{height: 20}} />
+          </div>
+        </div>
 
-          <button
-            onClick={togglePlay}
-            className="w-12 h-12 bg-orange-500 hover:bg-orange-600 text-white rounded-full flex items-center justify-center shadow-md transition-colors shrink-0"
-            style={{ fontSize: '1.1rem' }}
-          >
-            {playing ? (
-              <span className="flex gap-1">
-                <span className="w-[3px] h-4 bg-white rounded-sm" />
-                <span className="w-[3px] h-4 bg-white rounded-sm" />
-              </span>
-            ) : (
-              <span style={{ marginLeft: 3 }}>▶</span>
+        {/* Progress bar */}
+        <div className="w-full max-w-[600px] mx-auto px-5 mb-4">
+          <div className="relative h-3 w-full bg-surface-container-highest rounded-full overflow-visible cursor-pointer" onClick={seek}>
+            <div className="absolute top-0 left-0 h-full bg-secondary rounded-full transition-all" style={{width:`${progress}%`, boxShadow:'0 0 12px rgba(127,214,195,0.5)'}} />
+            {progress > 0 && (
+              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 bg-primary-container rounded-full flex items-center justify-center border-2 border-on-primary" style={{left:`${progress}%`}}>
+                <span className="material-symbols-outlined ms-fill text-on-primary-container" style={{fontSize:14}}>star</span>
+              </div>
             )}
-          </button>
-
-          <span className="text-xs text-gray-400 font-mono w-10 text-right">{fmt(duration)}</span>
+          </div>
+          <div className="flex justify-between mt-1.5 text-xs text-on-surface-variant font-mono">
+            <span>{fmt(currentTime)}</span>
+            <span>{fmt(duration)}</span>
+          </div>
         </div>
-
-        <p className="text-center text-xs text-gray-300 mt-2">
-          Space to play / pause · Esc to go back
-        </p>
       </div>
+
+      {/* Floating audio controls */}
+      <div className="fixed bottom-0 left-0 w-full z-10 px-5 pb-10 flex flex-col items-center gap-4">
+        {/* Secondary controls */}
+        <div className="flex gap-4">
+          <button onClick={() => { if(audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 10) }}
+            className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-3 rounded-full border border-outline-variant/20 text-sm font-medium transition-all active:scale-95">
+            <span className="material-symbols-outlined text-secondary text-base">replay_10</span>
+            <span className="text-xs">Replay</span>
+          </button>
+          <button className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-3 rounded-full border border-outline-variant/20 text-sm font-medium transition-all active:scale-95">
+            <span className="material-symbols-outlined text-tertiary-fixed-dim text-base">bedtime</span>
+            <span className="text-xs">Sleepy Mode</span>
+          </button>
+        </div>
+        {/* Main playback */}
+        <div className="flex items-center gap-6 bg-surface-container-high/90 backdrop-blur-xl px-8 py-4 rounded-full border border-outline-variant/30" style={{boxShadow:'0 8px 32px rgba(0,0,0,0.5)'}}>
+          <button onClick={() => { if(audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 30) }} className="text-on-surface-variant hover:text-primary-fixed transition-colors">
+            <span className="material-symbols-outlined" style={{fontSize:32}}>skip_previous</span>
+          </button>
+          <button onClick={togglePlay} className="w-20 h-20 bg-primary-container rounded-full flex items-center justify-center transition-all active:translate-y-1 glow-primary" style={{boxShadow:'0 4px 0 0 #e9c400'}}>
+            <span className="material-symbols-outlined ms-fill text-on-primary-container" style={{fontSize:48}}>
+              {playing ? 'pause' : 'play_arrow'}
+            </span>
+          </button>
+          <button onClick={() => { if(audioRef.current) audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 30) }} className="text-on-surface-variant hover:text-primary-fixed transition-colors">
+            <span className="material-symbols-outlined" style={{fontSize:32}}>skip_next</span>
+          </button>
+        </div>
+        <p className="text-xs text-on-surface-variant opacity-60">Space to play/pause · Esc to go back</p>
+      </div>
+      <audio ref={audioRef} src={audioUrl} preload="auto" className="hidden" />
     </div>
   )
 }
