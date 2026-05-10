@@ -2,7 +2,6 @@ import os
 import json
 import uuid
 import hashlib
-import base64
 import tomllib
 import logging
 from pathlib import Path
@@ -26,9 +25,8 @@ if _env.exists():
     except ImportError:
         pass
 
-EL_KEY = os.getenv("ELEVENLABS_API_KEY", "")
-EL_TTS_MODEL = os.getenv("ELEVENLABS_TTS_MODEL", "eleven_turbo_v2_5")
-EL_TTS_FORMAT = os.getenv("ELEVENLABS_TTS_FORMAT", "mp3_22050_32")
+FA_KEY = os.getenv("FISH_AUDIO_API_KEY", "")
+FA_TTS_BITRATE = int(os.getenv("FISH_AUDIO_MP3_BITRATE", "128"))
 
 # Admin secret — set via: fly secrets set ADMIN_SECRET=<long-random-string>
 # If unset, all admin endpoints return 403.
@@ -76,7 +74,7 @@ MAX_REC_BYTES: int = _cfg.get("uploads", {}).get("max_recording_mb", 50) * 1024 
 log = logging.getLogger("kidly")
 
 # Recognised audio extensions for voice-clone uploads. Anything else (e.g. macOS
-# .DS_Store) found in the session dir is ignored before being shipped to ElevenLabs.
+# .DS_Store) found in the session dir is ignored before being shipped to Fish Audio.
 AUDIO_EXTS = {".webm", ".m4a", ".mp3", ".wav", ".ogg", ".mp4"}
 
 # Map the browser's content-type to the file extension we'll persist on disk,
@@ -93,8 +91,8 @@ _CTYPE_TO_EXT = {
     "audio/x-wav": ".wav",
 }
 
-# Map the persisted extension back to the mime type ElevenLabs expects in the
-# multipart upload of /v1/voices/add.
+# Map the persisted extension back to the mime type Fish Audio expects in the
+# multipart upload of POST /model.
 _EXT_TO_MIME = {
     ".webm": "audio/webm",
     ".m4a": "audio/mp4",
@@ -640,8 +638,8 @@ async def upload_recording(
 @app.post("/api/voice/clone")
 @limiter.limit(RL_VOICE_CLONE)
 async def clone_voice(request: Request, req: CloneRequest):
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set — copy .env.example to .env and add your key")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set — add it to .env")
 
     session_dir = REC_DIR / req.session_id
     audio_files = (
@@ -662,22 +660,25 @@ async def clone_voice(request: Request, req: CloneRequest):
             continue
         seen.add(h)
         mime = _EXT_TO_MIME.get(f.suffix.lower(), "application/octet-stream")
-        upload_files.append(("files", (f.name, content, mime)))
+        upload_files.append(("voices", (f.name, content, mime)))
 
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(
-            "https://api.elevenlabs.io/v1/voices/add",
-            headers={"xi-api-key": EL_KEY},
-            data={"name": req.label},
+            "https://api.fish.audio/model",
+            headers={"Authorization": f"Bearer {FA_KEY}"},
+            data={"type": "tts", "title": req.label, "train_mode": "fast", "visibility": "private"},
             files=upload_files,
         )
         if r.status_code >= 400:
             body = r.text.lower()
-            if "minimum" in body or "not enough" in body or "too short" in body or "1 minute" in body:
+            if "short" in body or "minimum" in body or "not enough" in body:
                 raise HTTPException(400, "Recording too short — please record at least 60 seconds of clear audio and try again.")
             raise HTTPException(r.status_code, r.text)
 
-        voice_id = r.json()["voice_id"]
+        payload = r.json()
+        voice_id = payload.get("_id") or payload.get("id")
+        if not voice_id:
+            raise HTTPException(500, f"Fish Audio did not return a model ID: {payload}")
 
     # Recordings are only needed for the clone call — delete them immediately.
     import shutil
@@ -706,23 +707,25 @@ async def clone_voice(request: Request, req: CloneRequest):
 async def voice_preview(request: Request, req: VoicePreviewRequest):
     """Generate a short voice preview sample, cached per voice_id."""
     _validate_session(req.voice_id, req.session_token)
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set in .env")
 
     cache_key = hashlib.sha256(
-        f"preview:{req.voice_id}:{EL_TTS_MODEL}:{EL_TTS_FORMAT}".encode()
+        f"preview:{req.voice_id}:fa:mp3:{FA_TTS_BITRATE}".encode()
     ).hexdigest()[:20]
     cache_path = TTS_DIR / f"{cache_key}.mp3"
 
     if not cache_path.exists():
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{req.voice_id}",
-                headers={"xi-api-key": EL_KEY, "Content-Type": "application/json"},
+                "https://api.fish.audio/v1/tts",
+                headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
                 json={
                     "text": PREVIEW_TEXT,
-                    "model_id": EL_TTS_MODEL,
-                    "output_format": EL_TTS_FORMAT,
+                    "reference_id": req.voice_id,
+                    "format": "mp3",
+                    "mp3_bitrate": FA_TTS_BITRATE,
+                    "latency": "normal",
                 },
             )
             if r.status_code >= 400:
@@ -736,15 +739,15 @@ async def voice_preview(request: Request, req: VoicePreviewRequest):
 @limiter.limit(RL_STORY_SPEAK)
 async def speak(request: Request, req: SpeakRequest):
     _validate_session(req.voice_id, req.session_token)
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set in .env")
 
     story = STORIES.get(req.story_key)
     if not story:
         raise HTTPException(404, f"Unknown story: {req.story_key}")
 
     cache_key = hashlib.sha256(
-        f"{req.voice_id}:{req.story_key}:{EL_TTS_MODEL}:{EL_TTS_FORMAT}".encode()
+        f"{req.voice_id}:{req.story_key}:fa:mp3:{FA_TTS_BITRATE}".encode()
     ).hexdigest()[:20]
     cache_path = TTS_DIR / f"{cache_key}.mp3"
     was_cached = cache_path.exists()
@@ -752,12 +755,14 @@ async def speak(request: Request, req: SpeakRequest):
     if not was_cached:
         async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(
-                f"https://api.elevenlabs.io/v1/text-to-speech/{req.voice_id}",
-                headers={"xi-api-key": EL_KEY, "Content-Type": "application/json"},
+                "https://api.fish.audio/v1/tts",
+                headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
                 json={
                     "text": story["content"],
-                    "model_id": EL_TTS_MODEL,
-                    "output_format": EL_TTS_FORMAT,
+                    "reference_id": req.voice_id,
+                    "format": "mp3",
+                    "mp3_bitrate": FA_TTS_BITRATE,
+                    "latency": "normal",
                 },
             )
             if r.status_code >= 400:
@@ -770,46 +775,47 @@ async def speak(request: Request, req: SpeakRequest):
 @app.post("/api/stories/speak-timestamped")
 @limiter.limit(RL_STORY_SPEAK_TS)
 async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
-    """TTS with character-level alignment for word-sync highlighting."""
+    """TTS for story playback, cached per voice+story."""
     _validate_session(req.voice_id, req.session_token)
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set in .env")
 
     story = STORIES.get(req.story_key)
     if not story:
         raise HTTPException(404, f"Unknown story: {req.story_key}")
 
     cache_key = hashlib.sha256(
-        f"ts:{req.voice_id}:{req.story_key}:{EL_TTS_MODEL}:{EL_TTS_FORMAT}".encode()
+        f"ts:{req.voice_id}:{req.story_key}:fa:mp3:{FA_TTS_BITRATE}".encode()
     ).hexdigest()[:20]
     audio_path = TTS_DIR / f"{cache_key}.mp3"
-    align_path = TTS_DIR / f"{cache_key}_align.json"
 
-    if audio_path.exists() and align_path.exists():
+    if audio_path.exists():
         return {
             "audio_url": f"/api/audio/{cache_key}.mp3",
-            "alignment": json.loads(align_path.read_text()),
+            "alignment": None,
             "story_text": story["content"],
             "from_cache": True,
         }
 
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{req.voice_id}/with-timestamps",
-            headers={"xi-api-key": EL_KEY, "Content-Type": "application/json"},
-            json={"text": story["content"], "model_id": EL_TTS_MODEL, "output_format": EL_TTS_FORMAT},
+            "https://api.fish.audio/v1/tts",
+            headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
+            json={
+                "text": story["content"],
+                "reference_id": req.voice_id,
+                "format": "mp3",
+                "mp3_bitrate": FA_TTS_BITRATE,
+                "latency": "normal",
+            },
         )
         if r.status_code >= 400:
             raise HTTPException(r.status_code, r.text)
 
-    data = r.json()
-    audio_path.write_bytes(base64.b64decode(data["audio_base64"]))
-    alignment = data.get("normalized_alignment") or data.get("alignment")
-    align_path.write_text(json.dumps(alignment))
-
+    audio_path.write_bytes(r.content)
     return {
         "audio_url": f"/api/audio/{cache_key}.mp3",
-        "alignment": alignment,
+        "alignment": None,
         "story_text": story["content"],
         "from_cache": False,
     }
@@ -818,45 +824,46 @@ async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
 @app.post("/api/voice/speak-custom")
 @limiter.limit(RL_SPEAK_CUSTOM)
 async def speak_custom(request: Request, req: CustomSpeakRequest):
-    """TTS for user-provided text with alignment, cached by content hash."""
+    """TTS for user-provided text, cached by content hash."""
     _validate_session(req.voice_id, req.session_token)
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set in .env")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set in .env")
     if not req.text or not req.text.strip():
         raise HTTPException(400, "Text cannot be empty")
     if len(req.text) > 3000:
         raise HTTPException(400, "Text too long — keep it under 3 000 characters")
 
     cache_key = hashlib.sha256(
-        f"custom:{req.voice_id}:{req.text.strip()}:{EL_TTS_MODEL}:{EL_TTS_FORMAT}".encode()
+        f"custom:{req.voice_id}:{req.text.strip()}:fa:mp3:{FA_TTS_BITRATE}".encode()
     ).hexdigest()[:20]
     audio_path = TTS_DIR / f"{cache_key}.mp3"
-    align_path = TTS_DIR / f"{cache_key}_align.json"
 
-    if audio_path.exists() and align_path.exists():
+    if audio_path.exists():
         return {
             "audio_url": f"/api/audio/{cache_key}.mp3",
-            "alignment": json.loads(align_path.read_text()),
+            "alignment": None,
             "from_cache": True,
         }
 
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{req.voice_id}/with-timestamps",
-            headers={"xi-api-key": EL_KEY, "Content-Type": "application/json"},
-            json={"text": req.text.strip(), "model_id": EL_TTS_MODEL, "output_format": EL_TTS_FORMAT},
+            "https://api.fish.audio/v1/tts",
+            headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
+            json={
+                "text": req.text.strip(),
+                "reference_id": req.voice_id,
+                "format": "mp3",
+                "mp3_bitrate": FA_TTS_BITRATE,
+                "latency": "normal",
+            },
         )
         if r.status_code >= 400:
             raise HTTPException(r.status_code, r.text)
 
-    data = r.json()
-    audio_path.write_bytes(base64.b64decode(data["audio_base64"]))
-    alignment = data.get("normalized_alignment") or data.get("alignment")
-    align_path.write_text(json.dumps(alignment))
-
+    audio_path.write_bytes(r.content)
     return {
         "audio_url": f"/api/audio/{cache_key}.mp3",
-        "alignment": alignment,
+        "alignment": None,
         "from_cache": False,
     }
 
@@ -931,40 +938,116 @@ async def get_default_voice(request: Request):
     return {"voice_id": DEFAULT_VOICE_ID, "session_token": DEFAULT_SESSION_TOKEN}
 
 
+# ── TEMPORARY debug endpoints — remove before launch ──────────────────────────
+
+class DebugSpeakRequest(BaseModel):
+    voice_id: str
+    story_key: str
+
+
+@app.get("/api/debug/voices")
+async def debug_list_voices(request: Request):
+    """TEMP: List own + popular Fish Audio voices for voice-testing."""
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
+    import asyncio
+    async with httpx.AsyncClient(timeout=30) as client:
+        own_r, pub_r = await asyncio.gather(
+            client.get(
+                "https://api.fish.audio/model",
+                headers={"Authorization": f"Bearer {FA_KEY}"},
+                params={"self": "true", "page_size": 50, "page_number": 1},
+            ),
+            client.get(
+                "https://api.fish.audio/model",
+                headers={"Authorization": f"Bearer {FA_KEY}"},
+                params={"page_size": 40, "page_number": 1, "sort_by": "score", "language": "en"},
+            ),
+        )
+    own_items = own_r.json().get("items", []) if own_r.status_code == 200 else []
+    pub_items = pub_r.json().get("items", []) if pub_r.status_code == 200 else []
+
+    def fmt(v, group):
+        return {"voice_id": v["_id"], "name": v.get("title", "Unnamed"), "group": group}
+
+    return {
+        "voices": [fmt(v, "My voices") for v in own_items]
+                + [fmt(v, "Fish Audio") for v in pub_items]
+    }
+
+
+@app.post("/api/debug/speak")
+async def debug_speak(request: Request, req: DebugSpeakRequest):
+    """TEMP: TTS with any voice_id, no session validation."""
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
+    story = STORIES.get(req.story_key)
+    if not story:
+        raise HTTPException(404, f"Unknown story: {req.story_key}")
+
+    cache_key = hashlib.sha256(
+        f"ts:{req.voice_id}:{req.story_key}:fa:mp3:{FA_TTS_BITRATE}".encode()
+    ).hexdigest()[:20]
+    audio_path = TTS_DIR / f"{cache_key}.mp3"
+
+    if not audio_path.exists():
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(
+                "https://api.fish.audio/v1/tts",
+                headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
+                json={
+                    "text": story["content"],
+                    "reference_id": req.voice_id,
+                    "format": "mp3",
+                    "mp3_bitrate": FA_TTS_BITRATE,
+                    "latency": "normal",
+                },
+            )
+            if r.status_code >= 400:
+                raise HTTPException(r.status_code, r.text)
+            audio_path.write_bytes(r.content)
+
+    return {
+        "audio_url": f"/api/audio/{cache_key}.mp3",
+        "alignment": None,
+        "story_text": story["content"],
+    }
+
+
 # ── Voice management (admin) ───────────────────────────────────────────────────
 
 @app.get("/api/admin/voices")
 async def list_cloned_voices(request: Request):
-    """List all cloned voices on the ElevenLabs account."""
+    """List all voice models owned by this account on Fish Audio."""
     _check_admin(request)
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(
-            "https://api.elevenlabs.io/v1/voices",
-            headers={"xi-api-key": EL_KEY},
+            "https://api.fish.audio/model",
+            headers={"Authorization": f"Bearer {FA_KEY}"},
+            params={"self": "true", "page_size": 100, "page_number": 1},
         )
         if r.status_code >= 400:
             raise HTTPException(r.status_code, r.text)
-        voices = r.json().get("voices", [])
-        cloned = [
-            {"voice_id": v["voice_id"], "name": v["name"], "category": v.get("category")}
-            for v in voices
-            if v.get("category") == "cloned"
+        data = r.json()
+        voices = [
+            {"voice_id": v["_id"], "name": v.get("title"), "state": v.get("state")}
+            for v in data.get("items", [])
         ]
-        return {"cloned_voices": cloned, "count": len(cloned)}
+        return {"voices": voices, "count": len(voices)}
 
 
 @app.delete("/api/admin/voices/{voice_id}")
 async def delete_voice(request: Request, voice_id: str):
-    """Delete a single cloned voice by ID."""
+    """Delete a single voice model by ID."""
     _check_admin(request)
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.delete(
-            f"https://api.elevenlabs.io/v1/voices/{voice_id}",
-            headers={"xi-api-key": EL_KEY},
+            f"https://api.fish.audio/model/{voice_id}",
+            headers={"Authorization": f"Bearer {FA_KEY}"},
         )
         if r.status_code >= 400:
             raise HTTPException(r.status_code, r.text)
@@ -973,27 +1056,28 @@ async def delete_voice(request: Request, voice_id: str):
 
 @app.delete("/api/admin/voices")
 async def delete_all_cloned_voices(request: Request):
-    """Delete every cloned voice on the account. Irreversible."""
+    """Delete every owned voice model on the account. Irreversible."""
     _check_admin(request)
-    if not EL_KEY:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not set")
+    if not FA_KEY:
+        raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.get(
-            "https://api.elevenlabs.io/v1/voices",
-            headers={"xi-api-key": EL_KEY},
+            "https://api.fish.audio/model",
+            headers={"Authorization": f"Bearer {FA_KEY}"},
+            params={"self": "true", "page_size": 100, "page_number": 1},
         )
         if r.status_code >= 400:
             raise HTTPException(r.status_code, r.text)
-        cloned = [v for v in r.json().get("voices", []) if v.get("category") == "cloned"]
+        items = r.json().get("items", [])
 
         deleted, failed = [], []
-        for v in cloned:
+        for v in items:
             dr = await client.delete(
-                f"https://api.elevenlabs.io/v1/voices/{v['voice_id']}",
-                headers={"xi-api-key": EL_KEY},
+                f"https://api.fish.audio/model/{v['_id']}",
+                headers={"Authorization": f"Bearer {FA_KEY}"},
             )
             (deleted if dr.status_code < 400 else failed).append(
-                {"voice_id": v["voice_id"], "name": v["name"]}
+                {"voice_id": v["_id"], "name": v.get("title")}
             )
 
         return {"deleted": deleted, "failed": failed, "total_deleted": len(deleted)}

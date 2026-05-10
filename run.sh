@@ -8,13 +8,12 @@ FRONTEND_DIR="$SCRIPT_DIR/frontend"
 # Ensure tmp dirs exist
 mkdir -p "$SCRIPT_DIR/tmp/recordings" "$SCRIPT_DIR/tmp/tts"
 
-# Copy .env.example → .env if no .env exists yet
 if [ ! -f "$BACKEND_DIR/.env" ]; then
-  cp "$BACKEND_DIR/.env.example" "$BACKEND_DIR/.env"
   echo ""
-  echo "⚠️  Created backend/.env from .env.example"
-  echo "   Add your ELEVENLABS_API_KEY to backend/.env before recording."
+  echo "⚠️  backend/.env not found."
+  echo "   Create it and add: FISH_AUDIO_API_KEY=<your key>"
   echo ""
+  exit 1
 fi
 
 # Load .env into environment

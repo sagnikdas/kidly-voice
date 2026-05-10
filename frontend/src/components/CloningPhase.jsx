@@ -22,15 +22,20 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
   const [previewErr, setPreviewErr] = useState('')
   const audioRef = useRef(null)
 
+  // Generation counter: prevents React StrictMode's double-invocation of useEffect
+  // from firing two concurrent clone requests to Fish Audio.
+  const runGenRef = useRef(0)
+
   useEffect(() => {
-    run()
+    const gen = ++runGenRef.current
+    run(gen)
   }, [retryCount])
 
   useEffect(() => {
     return () => { audioRef.current?.pause() }
   }, [])
 
-  const run = async () => {
+  const run = async (gen) => {
     setErr('')
     setStepIdx(0)
     setVoiceId('')
@@ -58,8 +63,11 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
         }
       }
 
+      // Only the most recent run proceeds to clone — cancels StrictMode duplicate.
+      if (runGenRef.current !== gen) return
+
       setStepIdx(1)
-      const label = email ? `${email.split('@')[0]}'s Kidly Voice` : 'My Kidly Voice'
+      const label = initialEmail ? `${initialEmail.split('@')[0]}'s Kidly Voice` : 'My Kidly Voice'
       const r = await fetch('/api/voice/clone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -70,6 +78,8 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
         throw new Error(j.detail || 'Voice cloning failed')
       }
       const { voice_id, session_token } = await r.json()
+
+      if (runGenRef.current !== gen) return
 
       // If email was already provided on landing, save immediately.
       if (initialEmail) {
@@ -85,6 +95,7 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
       setSessionToken(session_token)
       setStepIdx(2)
     } catch (e) {
+      if (runGenRef.current !== gen) return
       setErr(e.message)
     }
   }

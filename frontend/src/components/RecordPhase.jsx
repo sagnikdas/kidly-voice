@@ -71,23 +71,28 @@ function RecordLive({ onReady }) {
   const [confirmed, setConfirmed] = useState(false)
   const [starting, setStarting] = useState(false)   // waiting for mic permission
   const [micBlocked, setMicBlocked] = useState(false)
+  const [micLevel, setMicLevel] = useState(0)        // 0–100, live mic volume
 
-  const recRef    = useRef(null)
-  const chunksRef = useRef([])
-  const t0Ref     = useRef(null)
-  const tickRef   = useRef(null)
-  const takeRef   = useRef(take)
-  takeRef.current = take
+  const recRef      = useRef(null)
+  const chunksRef   = useRef([])
+  const t0Ref       = useRef(null)
+  const tickRef     = useRef(null)
+  const levelRafRef = useRef(null)
+  const analyserRef = useRef(null)
+  const audioCtxRef = useRef(null)
+  const takeRef     = useRef(take)
+  takeRef.current   = take
 
   useEffect(() => {
-    // Check if mic permission was previously denied
     navigator.permissions?.query({ name: 'microphone' }).then(status => {
       if (status.state === 'denied') setMicBlocked(true)
       status.onchange = () => setMicBlocked(status.state === 'denied')
     }).catch(() => {})
     return () => {
       clearInterval(tickRef.current)
+      cancelAnimationFrame(levelRafRef.current)
       try { recRef.current?.stop() } catch {}
+      try { audioCtxRef.current?.close() } catch {}
       if (takeRef.current?.url) URL.revokeObjectURL(takeRef.current.url)
     }
   }, [])
@@ -105,9 +110,26 @@ function RecordLive({ onReady }) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       setStarting(false)
 
+      // Live mic level meter via Web Audio analyser
+      try {
+        const ctx      = new AudioContext()
+        audioCtxRef.current = ctx
+        const source   = ctx.createMediaStreamSource(stream)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 256
+        source.connect(analyser)
+        analyserRef.current = analyser
+        const buf = new Uint8Array(analyser.frequencyBinCount)
+        const pollLevel = () => {
+          analyser.getByteFrequencyData(buf)
+          const avg = buf.reduce((s, v) => s + v, 0) / buf.length
+          setMicLevel(Math.min(100, Math.round(avg * 2.5)))
+          levelRafRef.current = requestAnimationFrame(pollLevel)
+        }
+        pollLevel()
+      } catch {}
+
       // Try formats in order; fall back to browser default if none match.
-      // We read mr.mimeType AFTER construction — that's the format the browser
-      // actually chose (e.g. Safari internally uses mp4 regardless of what we ask).
       const CANDIDATES = [
         'audio/webm;codecs=opus',
         'audio/ogg;codecs=opus',
@@ -122,14 +144,17 @@ function RecordLive({ onReady }) {
       } catch {
         mr = new MediaRecorder(stream)
       }
-      const actualMime = mr.mimeType  // what the browser actually uses
+      const actualMime = mr.mimeType
 
       chunksRef.current = []
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       mr.onstop = () => {
+        cancelAnimationFrame(levelRafRef.current)
+        setMicLevel(0)
+        try { audioCtxRef.current?.close(); audioCtxRef.current = null } catch {}
         const blob = new Blob(chunksRef.current, { type: actualMime || 'audio/webm' })
         const ms   = Date.now() - t0Ref.current
-        const isSilent = blob.size < (ms / 1000) * 500  // ~500 B/s minimum for any real audio
+        const isSilent = blob.size < (ms / 1000) * 200
         setTake({ blob, ms, url: URL.createObjectURL(blob), mime: actualMime, isSilent, isFile: false })
         setPhase('review')
         stream.getTracks().forEach(t => t.stop())
@@ -160,7 +185,7 @@ function RecordLive({ onReady }) {
   }
 
   const durationSec = take ? take.ms / 1000 : 0
-  const hasEnough   = durationSec >= 60
+  const hasEnough   = durationSec >= 30
 
   return (
     <div className="space-y-6">
@@ -209,7 +234,7 @@ function RecordLive({ onReady }) {
                 <span className="w-3 h-3 bg-white rounded-full" />
                 Start Recording
               </button>
-              <p className="text-xs text-gray-400 mt-3">Read the passage above naturally — aim for 60–90 seconds</p>
+              <p className="text-xs text-gray-400 mt-3">Read the passage above naturally — aim for 30–60 seconds</p>
             </>
           )}
         </div>
@@ -221,10 +246,36 @@ function RecordLive({ onReady }) {
           <div className="inline-flex items-center gap-3 bg-red-50 border border-red-100 px-8 py-3 rounded-full">
             <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
             <span className="font-mono text-2xl font-semibold text-gray-800 tabular-nums">{fmt(timer)}</span>
-            {timer >= 60 && (
+            {timer >= 30 && (
               <span className="text-green-600 text-xs font-bold bg-green-50 px-2 py-0.5 rounded-full">✓ enough</span>
             )}
           </div>
+
+          {/* Live mic level meter */}
+          <div className="flex items-center justify-center gap-1.5">
+            {Array.from({ length: 12 }).map((_, i) => {
+              const threshold = (i / 12) * 100
+              const active = micLevel > threshold
+              return (
+                <div
+                  key={i}
+                  className="w-2 rounded-sm transition-all duration-75"
+                  style={{
+                    height: 8 + i * 2,
+                    backgroundColor: active
+                      ? (micLevel < 30 ? '#f97316' : micLevel < 70 ? '#22c55e' : '#22c55e')
+                      : '#e5e7eb',
+                  }}
+                />
+              )
+            })}
+          </div>
+          {micLevel < 5 && (
+            <p className="text-xs text-red-500 font-medium">
+              ⚠️ No mic signal detected — check System Settings → Sound → Input
+            </p>
+          )}
+
           <div>
             <button
               onClick={stopRec}
@@ -281,7 +332,7 @@ function RecordLive({ onReady }) {
               ) : (
                 <>
                   <span className="w-4 h-4 bg-amber-400 text-white rounded-full flex items-center justify-center text-xs">!</span>
-                  {durationSec.toFixed(0)}s — need {Math.ceil(60 - durationSec)}s more for a good voice clone
+                  {durationSec.toFixed(0)}s — need {Math.ceil(30 - durationSec)}s more for a good voice clone
                 </>
               )}
             </div>
@@ -373,7 +424,7 @@ function UploadFiles({ onReady }) {
 
   const knownSec      = files.reduce((s, f) => s + (f.durationMs || 0) / 1000, 0)
   const allUnknown    = files.length > 0 && files.every(f => f.durationMs === null)
-  const hasEnough     = knownSec >= 60 || allUnknown
+  const hasEnough     = knownSec >= 30 || allUnknown
   const hasSilent     = files.some(f => f.isSilent)
 
   const fakeTakes = files.map(f => ({
@@ -424,12 +475,12 @@ function UploadFiles({ onReady }) {
 
           {allUnknown ? (
             <p className="text-sm font-medium text-amber-600">
-              ⚠️ Couldn't detect audio length — please make sure your recording is at least 60 seconds.
+              ⚠️ Couldn't detect audio length — please make sure your recording is at least 30 seconds.
             </p>
           ) : (
             <p className={`text-sm font-medium ${hasEnough ? 'text-green-600' : 'text-amber-600'}`}>
               Total: {knownSec.toFixed(0)}s
-              {hasEnough ? ' ✓ Ready!' : ` — need ${Math.ceil(60 - knownSec)}s more`}
+              {hasEnough ? ' ✓ Ready!' : ` — need ${Math.ceil(30 - knownSec)}s more`}
             </p>
           )}
 
@@ -463,7 +514,7 @@ export default function RecordPhase({ sessionId, onBack, onRecordingsReady }) {
 
         <h2 className="text-2xl font-bold text-gray-800 mb-1">Record your voice</h2>
         <p className="text-gray-500 text-sm mb-6">
-          Read the passage aloud naturally. Aim for 60–90 seconds — the more the better.
+          Read the passage aloud naturally. Aim for 30–60 seconds — the more the better.
         </p>
 
         {/* Tab switcher */}

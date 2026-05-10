@@ -13,10 +13,11 @@ Everything you need to deploy, redeploy, and operate the Kidly Voice app on Fly.
 5. [First-Time Deployment](#5-first-time-deployment)
 6. [Redeployment Scenarios](#6-redeployment-scenarios)
 7. [Environment Variables and Secrets](#7-environment-variables-and-secrets)
-8. [Volume Management](#8-volume-management)
-9. [Useful Fly.io Commands](#9-useful-flyio-commands)
-10. [API Endpoints Reference](#10-api-endpoints-reference)
-11. [Cost Breakdown](#11-cost-breakdown)
+8. [Runtime Configuration (config.toml)](#8-runtime-configuration-configtoml)
+9. [Volume Management](#9-volume-management)
+10. [Useful Fly.io Commands](#10-useful-flyio-commands)
+11. [API Endpoints Reference](#11-api-endpoints-reference)
+12. [Cost Breakdown](#12-cost-breakdown)
 
 ---
 
@@ -34,8 +35,8 @@ Browser (React SPA)
         │
         ├─► ElevenLabs API  (voice clone + TTS — external, paid)
         │
-        └─► /app/tmp/  (Fly.io persistent volume — 3 GB)
-              ├── users.json        ← user email → voice_id map
+        └─► /app/tmp/  (Fly.io persistent volume — 3 GB default, expand as needed)
+              ├── users.json        ← session tokens + email index
               ├── feedback.json     ← feedback submissions
               ├── recordings/       ← temp uploads, deleted after clone
               └── tts/              ← MP3 + alignment cache (permanent)
@@ -103,20 +104,35 @@ All state is stored in files on the Fly.io volume mounted at `/app/tmp`.
 
 ### `tmp/users.json`
 
-Stores the mapping of user email → ElevenLabs voice_id.
+Stores session tokens (created at voice-clone time) and an email index for voice recovery.
 
 ```json
 {
-  "parent@example.com": {
-    "voice_id": "abc123xyz",
-    "updated_at": "2026-05-08T10:30:00+00:00"
+  "sessions": {
+    "<uuid-session-token>": {
+      "voice_id": "abc123xyz",
+      "email": "parent@example.com",
+      "created_at": "2026-05-08T10:30:00+00:00",
+      "updated_at": "2026-05-08T10:30:00+00:00"
+    }
+  },
+  "email_index": {
+    "parent@example.com": "<uuid-session-token>"
   }
 }
 ```
 
-**Written by:** `POST /api/user/save` (called automatically after voice clone if email was provided)  
-**Read by:** `GET /api/user/lookup?email=...` (called on landing page when user enters email)  
-**Purpose:** Lets users restore their voice_id on a new device or after clearing their browser
+**Written by:**
+- `POST /api/voice/clone` — creates a new session token and stores it with the `voice_id`
+- `POST /api/user/save` — links an email to an existing session token
+
+**Read by:** `GET /api/user/lookup?email=...` — returns both `voice_id` and `session_token` so the user can resume from any device
+
+**Session token rules:**
+- Generated server-side (UUID v4) at clone time; the browser never creates tokens
+- Required on all TTS/preview endpoints — passed as `session_token` in the JSON body
+- Verified against the `voice_id` before every ElevenLabs call (prevents cross-user access)
+- The demo voice (`DEFAULT_VOICE_ID` in config.toml) uses the constant token `kidly-demo-voice-v1` which bypasses users.json entirely
 
 ### `tmp/tts/`
 
@@ -128,18 +144,26 @@ tmp/tts/
   {hash}_align.json    ← word timing data for highlighting
 ```
 
-Cache key is `SHA256(voice_id + story_key + model + format)`, truncated to 20 hex chars. A separate `ts:` prefix is used for timestamped renders.
+Cache key is `SHA256(voice_id + story_key + model + format)`, truncated to 20 hex chars. A `ts:` prefix is used for timestamped renders.
 
-**Written by:** First play of any story by any user  
-**Read by:** Every subsequent play — ElevenLabs is NOT called again  
-**Size at scale:** ~0.5 MB per story per user; 2,000 users × 5 stories avg = ~5 GB
+**Written by:** First play of any story by any user
+**Read by:** Every subsequent play — ElevenLabs is NOT called again
+**Size at scale:** ~0.5–1 MB per story per user. Plan for ~0.75 MB × 15 stories × N users.
+
+| Users | Avg stories played | TTS storage needed |
+|---|---|---|
+| 100 | 5 | ~375 MB |
+| 500 | 8 | ~3 GB |
+| 2,000 | 10 | ~15 GB |
+
+**Expand the volume before you hit the limit** — see Section 9.
 
 ### `tmp/recordings/`
 
 Temporary storage for voice recordings uploaded during the clone flow.
 
-**Written by:** `POST /api/recording` (chunked uploads during Record phase)  
-**Deleted by:** `POST /api/voice/clone` — immediately after ElevenLabs confirms the clone  
+**Written by:** `POST /api/recording` (chunked uploads during Record phase)
+**Deleted by:** `POST /api/voice/clone` — immediately after ElevenLabs confirms the clone
 **At rest:** Always empty in production (deleted on every successful clone)
 
 ### `tmp/feedback.json`
@@ -151,7 +175,6 @@ Stores feedback form submissions.
   {
     "email": "user@example.com",
     "message": "Loved it!",
-    "session_id": "uuid-here",
     "ts": "2026-05-08T10:30:00+00:00"
   }
 ]
@@ -234,13 +257,22 @@ fly volumes create kidly_data --app kidly-voice --size 3 --region bom
 
 This creates a 3 GB volume in Mumbai. It is created once and survives all future deploys. The name `kidly_data` must match the `source` in `fly.toml`.
 
-### Step 5 — Set your ElevenLabs API key
+> **Expand early.** 3 GB is enough for ~500 users × 5 stories. If you expect rapid growth, expand immediately after first deploy — see Section 9.
+
+### Step 5 — Set secrets
 
 ```bash
+# Required: ElevenLabs API key
 fly secrets set ELEVENLABS_API_KEY=your_actual_key_here --app kidly-voice
+
+# Required: Admin key to protect admin endpoints (generate a random secret)
+fly secrets set ADMIN_SECRET=$(openssl rand -hex 32) --app kidly-voice
+
+# Required in production: Lock CORS to your domain
+fly secrets set CORS_ORIGINS=https://kidly-voice.fly.dev --app kidly-voice
 ```
 
-This stores the key encrypted in Fly.io's secret store and injects it as an environment variable at runtime. It is never written to any file or the Docker image.
+> Print and save the ADMIN_SECRET value before running — you'll need it to call admin endpoints (e.g. listing or deleting voices).
 
 ### Step 6 — Deploy
 
@@ -286,6 +318,7 @@ fly deploy
 | Python dependencies in `backend/requirements.txt` | New image built with updated packages |
 | React components in `frontend/src/` | React rebuilt (`npm run build`), new image |
 | New story added | React rebuilt (stories are in frontend data), new image |
+| `backend/config.toml` | New image built — config is baked into the image |
 | `fly.toml` settings (memory, region, etc.) | Machine reconfigured, may not need image rebuild |
 | Secrets (`fly secrets set`) | Machine restarted with new env vars, no image rebuild |
 
@@ -350,11 +383,19 @@ fly deploy --image <image-id>         # deploy a specific previous image
 
 ## 7. Environment Variables and Secrets
 
-| Variable | How it's set | Where it's used |
+Set these with `fly secrets set <KEY>=<value> --app kidly-voice`.
+
+| Variable | Required | Description |
 |---|---|---|
-| `ELEVENLABS_API_KEY` | `fly secrets set` | `backend/main.py` — all ElevenLabs calls |
-| `ELEVENLABS_TTS_MODEL` | Optional: `fly secrets set` | Defaults to `eleven_turbo_v2_5` |
-| `ELEVENLABS_TTS_FORMAT` | Optional: `fly secrets set` | Defaults to `mp3_22050_32` |
+| `ELEVENLABS_API_KEY` | Yes | All ElevenLabs calls (voice clone + TTS) |
+| `ADMIN_SECRET` | Yes | Protects admin endpoints — sent as `X-Admin-Key` header |
+| `CORS_ORIGINS` | Yes (prod) | Comma-separated allowed origins, e.g. `https://kidly-voice.fly.dev` |
+| `ELEVENLABS_TTS_MODEL` | No | Defaults to `eleven_turbo_v2_5` |
+| `ELEVENLABS_TTS_FORMAT` | No | Defaults to `mp3_22050_32` |
+
+**If `ADMIN_SECRET` is not set, all admin endpoints return 403.** This is a safe default — set it before you need to manage voices.
+
+**If `CORS_ORIGINS` is not set**, the app falls back to the `origins` list in `backend/config.toml` (local dev origins only). Always set this secret in production.
 
 **To view currently set secrets (names only — values are hidden):**
 
@@ -362,17 +403,45 @@ fly deploy --image <image-id>         # deploy a specific previous image
 fly secrets list --app kidly-voice
 ```
 
-**To update a secret:**
-
-```bash
-fly secrets set ELEVENLABS_API_KEY=new_value --app kidly-voice
-```
-
 **Never put secrets in `fly.toml` or commit them to Git.** The `backend/.env` file is excluded from Docker via `.dockerignore` and excluded from Git via `.gitignore`.
 
 ---
 
-## 8. Volume Management
+## 8. Runtime Configuration (config.toml)
+
+`backend/config.toml` controls all operator-tunable settings. It is baked into the Docker image at deploy time — **a code deploy is needed to change it**.
+
+```toml
+[voices]
+# Demo voice shown to users who skip email. Set to "" to disable demo mode.
+default_voice_id = "MXGyTMlsvQgQ4BL0emIa"
+
+[cors]
+# Dev-only fallback. Override in production via CORS_ORIGINS env var.
+origins = ["http://localhost:5173", "http://localhost:8000", "http://localhost:3000"]
+
+[uploads]
+# Max size per recording chunk in MB.
+max_recording_mb = 50
+
+[rate_limits]
+global_default          = "60/minute"
+recording_upload        = "30/minute"
+voice_clone             = "5/hour"
+voice_preview           = "10/hour"
+story_speak             = "30/hour"
+story_speak_timestamped = "30/hour"
+voice_speak_custom      = "20/hour"
+user_save               = "10/hour"
+user_lookup             = "20/hour"
+feedback                = "5/hour"
+```
+
+**To change a rate limit or disable demo mode:** edit `config.toml`, commit, and `fly deploy`.
+
+---
+
+## 9. Volume Management
 
 The Fly.io volume (`kidly_data`) is mounted at `/app/tmp` inside the container. It persists across every deploy, restart, and machine replacement.
 
@@ -384,23 +453,31 @@ fly volumes list --app kidly-voice
 
 ### Expand the volume (when TTS cache grows)
 
-At 2,000 users with ~5 stories each, expect ~5 GB of TTS files. Expand before you hit the limit:
+Do this **before** the volume fills up — a full volume causes write errors:
 
 ```bash
-fly volumes extend <volume-id> --size 10 --app kidly-voice
+fly volumes extend <volume-id> --size 25 --app kidly-voice
 ```
 
-Get the volume ID from `fly volumes list`.
+Get the volume ID from `fly volumes list`. Recommended sizes:
+
+| Users | Recommended volume size |
+|---|---|
+| < 200 | 3 GB (default) |
+| 200–500 | 8 GB |
+| 500–1,000 | 15 GB |
+| 1,000–2,000 | 25 GB |
+| 2,000+ | 40 GB+ |
 
 ### What's on the volume in production
 
 ```
 /app/tmp/
-  users.json          ← email → voice_id (grows ~50 bytes per user)
+  users.json          ← session tokens + email index (grows ~200 bytes per user)
   feedback.json       ← feedback submissions
   recordings/         ← always empty (deleted after clone)
   tts/
-    *.mp3             ← cached audio (~0.5 MB each)
+    *.mp3             ← cached audio (~0.5–1 MB each)
     *_align.json      ← word timing data (~20 KB each)
 ```
 
@@ -411,21 +488,21 @@ fly ssh console --app kidly-voice
 ls /app/tmp/
 cat /app/tmp/users.json
 ls /app/tmp/tts/ | wc -l   # count cached audio files
+du -sh /app/tmp/tts/        # total TTS cache size
 ```
 
 ### Back up the volume data
 
 ```bash
-# On the Fly machine:
 fly ssh console --app kidly-voice
 cat /app/tmp/users.json    # copy-paste to save locally
 ```
 
-For a full backup, use `fly ssh sftp` or `fly proxy` + rsync. There are no automated backups on Fly.io's free/hobby plan — do this manually before major changes.
+For a full backup, use `fly ssh sftp` or `fly proxy` + rsync. There are no automated backups on Fly.io's hobby plan — do this manually before major changes or volume resizes.
 
 ---
 
-## 9. Useful Fly.io Commands
+## 10. Useful Fly.io Commands
 
 ```bash
 # View live logs
@@ -446,8 +523,8 @@ fly open --app kidly-voice
 # Check health
 curl https://kidly-voice.fly.dev/api/health
 
-# Scale to always-on (no cold starts)
-# Edit fly.toml: min_machines_running = 1
+# Scale to always-on (no cold starts) — edit fly.toml first
+# min_machines_running = 1
 fly deploy
 
 # View secrets (names only)
@@ -462,48 +539,93 @@ fly machine status --app kidly-voice
 
 ---
 
-## 10. API Endpoints Reference
+## 11. API Endpoints Reference
 
 All endpoints are served by `backend/main.py`. In production, the base URL is `https://kidly-voice.fly.dev`.
 
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/api/recording` | Upload a voice recording chunk |
-| `POST` | `/api/voice/clone` | Send recordings to ElevenLabs, get `voice_id`; deletes recordings after |
+| `POST` | `/api/voice/clone` | Send recordings to ElevenLabs, get `voice_id` + `session_token`; deletes recordings after |
+| `GET` | `/api/voice/default` | Returns the demo `voice_id` + `session_token` (from `config.toml`); used for no-email users |
 | `POST` | `/api/voice/preview` | Generate a short preview clip in the cloned voice (cached) |
 | `POST` | `/api/stories/speak` | Generate TTS for a story (cached on disk) |
 | `POST` | `/api/stories/speak-timestamped` | Generate TTS + word alignment (cached on disk) |
-| `POST` | `/api/voice/speak-custom` | Generate TTS for custom text (cached on disk) |
+| `POST` | `/api/voice/speak-custom` | Generate TTS for custom text |
 | `GET` | `/api/audio/{filename}` | Serve a cached MP3 file from `/app/tmp/tts/` |
-| `POST` | `/api/user/save` | Save `email → voice_id` to `users.json` |
-| `GET` | `/api/user/lookup?email=` | Look up `voice_id` by email |
+| `POST` | `/api/user/save` | Link `{email, session_token}` — saves email against the session in `users.json` |
+| `GET` | `/api/user/lookup?email=` | Look up `voice_id` + `session_token` by email (for cross-device restore) |
 | `POST` | `/api/feedback` | Save feedback to `feedback.json` |
 | `GET` | `/api/health` | Health check — returns `{"ok": true}` |
-| `GET` | `/api/admin/voices` | List all cloned voices on the ElevenLabs account |
-| `DELETE` | `/api/admin/voices/{voice_id}` | Delete a single cloned voice |
-| `DELETE` | `/api/admin/voices` | Delete all cloned voices (irreversible) |
+| `GET` | `/api/admin/voices` | List all cloned voices on ElevenLabs (requires `X-Admin-Key` header) |
+| `DELETE` | `/api/admin/voices/{voice_id}` | Delete a single cloned voice (requires `X-Admin-Key`) |
+| `DELETE` | `/api/admin/voices` | Delete all cloned voices — irreversible (requires `X-Admin-Key`) |
 | `GET` | `/*` | Serves the React SPA (`frontend/dist/index.html`) |
+
+### Session token rules
+
+Every TTS and preview endpoint requires both `voice_id` and `session_token` in the request body. The server verifies the token matches the voice before calling ElevenLabs. Mismatched or missing tokens return `403`.
+
+The demo voice (`default_voice_id` in config.toml) accepts the constant token `kidly-demo-voice-v1` — this bypass is only valid for that one specific voice ID.
+
+### Calling admin endpoints
+
+```bash
+curl -X GET https://kidly-voice.fly.dev/api/admin/voices \
+  -H "X-Admin-Key: your-admin-secret-here"
+```
 
 ---
 
-## 11. Cost Breakdown
+## 12. Cost Breakdown
 
 ### Fly.io (monthly)
 
 | Resource | Config | Cost |
 |---|---|---|
-| Machine (shared-cpu-1x, 512 MB) | Stopped when idle | ~$0 idle / ~$4 if always-on |
-| Volume (3 GB) | `kidly_data` | $0.45/month |
-| Outbound bandwidth | First 100 GB free | $0 for MVP |
-| **Total at MVP scale** | | **~$0.45–$5/month** |
+| Machine (shared-cpu-1x, 512 MB) | Auto-stop when idle | ~$0–5 idle / ~$22 always-on |
+| Volume | 3 GB default — expand as needed | $0.15/GB/month |
+| Outbound bandwidth | First 100 GB free, then $0.02/GB | ~$0–5 |
+| **Total at MVP scale** | | **~$5–30/month** |
 
-### ElevenLabs (per user)
+When you set `min_machines_running = 1` (recommended once you have paying users), add ~$22/month for the always-on machine.
 
-Each user's 15 stories are generated once and cached forever. ElevenLabs is only called:
-- Once per user for voice cloning (`POST /v1/voices/add`)
-- Once per (user × story) for TTS on first play
+### ElevenLabs
 
-Repeat plays: **$0** — served from the volume cache.
+ElevenLabs is the dominant cost driver — not Fly.io.
+
+**Voice slots** limit how many cloned voices your account can store:
+
+| Plan | Price | Voice slots |
+|---|---|---|
+| Pro | $99/mo | 30 |
+| Scale | $330/mo | 160 |
+| Business | $1,320/mo | 660 |
+| Enterprise | Custom | Custom (2,000+) |
+
+For more than ~600 simultaneous users with individual cloned voices, contact ElevenLabs for enterprise pricing.
+
+**TTS character cost** (only on first play per user × story — cached plays are $0):
+
+| Users | Avg stories played | Characters | Estimated cost |
+|---|---|---|---|
+| 100 | 5 stories | 1.75M chars | ~$140–200 (one-time) |
+| 500 | 8 stories | 14M chars | ~$1,100–1,700 (one-time) |
+| 2,000 | 10 stories | 70M chars | ~$5,600–8,400 (one-time as users onboard) |
+
+Estimate assumes ~3,500 chars/story average and ~$0.08–0.12/1,000 chars at enterprise rates.
+
+**The TTS cache is your margin protector.** Each story + voice pair is generated once. A user replaying the same story 100 times = $0 in additional ElevenLabs cost.
+
+**At $15/user/month:**
+
+| Users | MRR | Est. ElevenLabs (monthly steady-state) | Fly.io | Margin |
+|---|---|---|---|---|
+| 100 | $1,500 | ~$100–200 | ~$5 | ~85–87% |
+| 500 | $7,500 | ~$200–400 | ~$15 | ~94–97% |
+| 2,000 | $30,000 | ~$1,500–2,500 | ~$30 | ~91–95% |
+
+Monthly steady-state ElevenLabs cost is lower than the one-time onboarding burst because the cache absorbs all replays.
 
 ---
 
@@ -516,6 +638,8 @@ fly auth login
 fly apps create kidly-voice
 fly volumes create kidly_data --app kidly-voice --size 3 --region bom
 fly secrets set ELEVENLABS_API_KEY=your_key --app kidly-voice
+fly secrets set ADMIN_SECRET=$(openssl rand -hex 32) --app kidly-voice
+fly secrets set CORS_ORIGINS=https://kidly-voice.fly.dev --app kidly-voice
 fly deploy
 
 # Every subsequent deploy (backend, frontend, or both)
@@ -525,6 +649,10 @@ fly deploy
 # Rotate API key
 fly secrets set ELEVENLABS_API_KEY=new_key --app kidly-voice
 
+# Expand volume (do this before it fills up)
+fly volumes list --app kidly-voice
+fly volumes extend <vol-id> --size 25 --app kidly-voice
+
 # View logs
 fly logs --app kidly-voice
 
@@ -533,4 +661,8 @@ fly ssh console --app kidly-voice
 
 # Health check
 curl https://kidly-voice.fly.dev/api/health
+
+# Call an admin endpoint
+curl -X GET https://kidly-voice.fly.dev/api/admin/voices \
+  -H "X-Admin-Key: your-admin-secret"
 ```

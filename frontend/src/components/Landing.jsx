@@ -58,7 +58,7 @@ export default function Landing({ email, setEmail, onStart, restoring }) {
           {
             icon: '🎙️',
             title: 'Record once',
-            desc: 'Read a short passage aloud — 60 seconds is all it takes to clone your voice.',
+            desc: 'Read a short passage aloud — 30 seconds is all it takes to clone your voice.',
           },
           {
             icon: '✨',

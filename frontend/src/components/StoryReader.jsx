@@ -18,6 +18,19 @@ function buildWordTimings(alignment) {
   return words
 }
 
+function buildEvenTimings(text, duration) {
+  if (!duration || !text) return []
+  const wordCount = text.split(/\n\n+/).reduce((n, para) => {
+    return n + para.split(/(\s+)/).filter(p => !/^\s+$/.test(p) && p.length > 0).length
+  }, 0)
+  if (!wordCount) return []
+  const perWord = duration / wordCount
+  return Array.from({ length: wordCount }, (_, i) => ({
+    start: i * perWord,
+    end: (i + 1) * perWord,
+  }))
+}
+
 function findWordIdx(words, time) {
   let lo = 0, hi = words.length - 1
   while (lo <= hi) {
@@ -43,7 +56,10 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
 
   const audioRef = useRef(null)
   const wordRefs = useRef([])
-  const wordTimings = useMemo(() => buildWordTimings(alignment), [alignment])
+  const wordTimings = useMemo(() => {
+    if (alignment?.characters) return buildWordTimings(alignment)
+    return buildEvenTimings(text, duration)
+  }, [alignment, text, duration])
 
   const handleTimeUpdate = useCallback(() => {
     const t = audioRef.current?.currentTime ?? 0

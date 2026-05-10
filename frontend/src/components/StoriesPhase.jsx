@@ -4,14 +4,41 @@ import StoryReader from './StoryReader'
 import CustomTextModal from './CustomTextModal'
 import { STORIES } from '../data/stories'
 
+function VoiceSelect({ value, options, onChange }) {
+  const groups = options.reduce((g, v) => {
+    ;(g[v.group] = g[v.group] || []).push(v)
+    return g
+  }, {})
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="flex-1 text-sm border border-indigo-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none focus:border-indigo-400"
+    >
+      <option value="">My cloned voice</option>
+      {Object.entries(groups).map(([group, voices]) => (
+        <optgroup key={group} label={group}>
+          {voices.map(v => (
+            <option key={v.voice_id} value={v.voice_id}>{v.name}</option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  )
+}
+
 export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, onReRecord, voiceJustCreated, onToastDismissed }) {
   const [viewMode, setViewMode] = useState('grid')
   const [playedKeys, setPlayedKeys] = useState(new Set())
-  const [audioCache, setAudioCache] = useState({})       // story.key → { audioUrl, alignment, text }
+  const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, alignment, text }
   const [loadingKey, setLoadingKey] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [readerState, setReaderState] = useState(null)   // { title, text, audioUrl, alignment }
   const [showCustomModal, setShowCustomModal] = useState(false)
+
+  // TEMP: voice picker for testing
+  const [testVoiceId, setTestVoiceId] = useState('')
+  const [voiceOptions, setVoiceOptions] = useState([])
 
   // Feedback state
   const [feedbackEmail, setFeedbackEmail] = useState(email || '')
@@ -30,6 +57,14 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     setLoadError('')
   }, [voiceId])
 
+  // TEMP: load Fish Audio voice list for testing
+  useEffect(() => {
+    fetch('/api/debug/voices')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.voices) setVoiceOptions(data.voices) })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     if (!voiceJustCreated) return
     const t = setTimeout(() => { setShowToast(false); onToastDismissed?.() }, 5000)
@@ -41,27 +76,40 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
   const handlePlayClick = async (story) => {
     if (!voiceId) { setLoadError('No voice found — please re-record.'); return }
 
+    const effectiveVoiceId = testVoiceId || voiceId
+    const cacheKey = `${effectiveVoiceId}:${story.key}`
+
     // Serve from in-session cache — no network call needed.
-    if (audioCache[story.key]) {
-      setReaderState({ title: story.title, ...audioCache[story.key] })
+    if (audioCache[cacheKey]) {
+      setReaderState({ title: story.title, ...audioCache[cacheKey] })
       return
     }
 
     setLoadingKey(story.key)
     setLoadError('')
     try {
-      const r = await fetch('/api/stories/speak-timestamped', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id: voiceId, story_key: story.key, session_token: sessionToken }),
-      })
+      let r
+      if (testVoiceId) {
+        // TEMP: use debug endpoint that skips session validation
+        r = await fetch('/api/debug/speak', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice_id: testVoiceId, story_key: story.key }),
+        })
+      } else {
+        r = await fetch('/api/stories/speak-timestamped', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice_id: voiceId, story_key: story.key, session_token: sessionToken }),
+        })
+      }
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || 'Failed to load story')
       }
       const { audio_url, alignment, story_text } = await r.json()
       const entry = { audioUrl: audio_url, alignment, text: story_text }
-      setAudioCache(prev => ({ ...prev, [story.key]: entry }))
+      setAudioCache(prev => ({ ...prev, [cacheKey]: entry }))
       setPlayedKeys(prev => new Set([...prev, story.key]))
       setReaderState({ title: story.title, ...entry })
     } catch (e) {
@@ -160,6 +208,26 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
               Re-record voice
             </button>
           </div>
+
+          {/* TEMP: voice picker for testing */}
+          {voiceOptions.length > 0 && (
+            <div className="mb-4 flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+              <span className="text-xs font-semibold text-indigo-600 shrink-0">🧪 Test voice</span>
+              <VoiceSelect
+                value={testVoiceId}
+                options={voiceOptions}
+                onChange={v => { setTestVoiceId(v); setAudioCache({}) }}
+              />
+              {testVoiceId && (
+                <button
+                  onClick={() => { setTestVoiceId(''); setAudioCache({}) }}
+                  className="text-xs text-indigo-400 hover:text-indigo-700 shrink-0"
+                >
+                  ✕ Reset
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Error banner */}
           {loadError && (
