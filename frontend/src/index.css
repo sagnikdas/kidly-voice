@@ -60,11 +60,67 @@
   font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
+/* Safe area inset variables — populated when viewport-fit=cover is active */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+html {
+  height: 100%;
+  /* Prevent pull-to-refresh and overscroll bounce in PWA standalone mode */
+  overscroll-behavior: none;
+}
+
 body {
-  background: #161309;
-  color: #eae2cf;
+  height: 100%;
+  background: var(--color-background);
+  color: var(--color-on-surface);
   font-family: 'Quicksand', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Prevent rubber-band scroll bounce */
+  overscroll-behavior: none;
+}
+
+/* Remove iOS/Android tap highlight flash on all interactive elements */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent double-tap zoom delay on buttons, links, and inputs */
+button, a, input, select, textarea, label {
+  touch-action: manipulation;
+}
+
+/* Light theme overrides */
+html[data-theme="light"] {
+  --color-background: #fffbf0;
+  --color-surface: #fffbf0;
+  --color-surface-dim: #f0ebd9;
+  --color-surface-bright: #ffffff;
+  --color-surface-container: #f0ead8;
+  --color-surface-container-high: #e8e2d0;
+  --color-surface-container-highest: #dfd9c7;
+  --color-surface-container-low: #f7f2e4;
+  --color-surface-container-lowest: #ffffff;
+  --color-on-surface: #1e1b00;
+  --color-on-surface-variant: #4e4530;
+  --color-outline: #887c50;
+  --color-outline-variant: #c5b98a;
+  --color-primary: #4a3a00;
+  --color-primary-fixed: #3a3000;
+  --color-primary-fixed-dim: #4e3e00;
+  --color-secondary: #00534a;
+  --color-secondary-container: #9ef2de;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #00201a;
+  --color-secondary-fixed: #006656;
+  --color-secondary-fixed-dim: #00534a;
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
 }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -75,3 +131,9 @@ body {
 .btn-3d:active { transform: translateY(2px); box-shadow: none; }
 .btn-3d-sm { box-shadow: 0 3px 0 0 #544600; }
 .btn-3d-sm:active { transform: translateY(2px); box-shadow: none; }
+
+/* Safe-area utilities — use these on fixed headers/footers */
+.safe-top    { padding-top:    var(--sat); }
+.safe-bottom { padding-bottom: var(--sab); }
+.h-header    { height: calc(56px + var(--sat)); }
+.pt-header   { padding-top: calc(56px + var(--sat)); }

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full bleed background (no rounded corners — maskable icons are cropped by the OS) -->
+  <rect width="512" height="512" fill="#1e1b4b"/>
+  <!-- Moon (crescent) — centered with 20% safe zone on each side -->
+  <circle cx="256" cy="210" r="110" fill="#ffd600"/>
+  <circle cx="292" cy="180" r="88" fill="#1e1b4b"/>
+  <!-- Stars -->
+  <circle cx="355" cy="310" r="13" fill="#ffd600"/>
+  <circle cx="308" cy="365" r="8" fill="#ffd600" opacity="0.8"/>
+  <circle cx="380" cy="375" r="6" fill="#ffd600" opacity="0.6"/>
+  <circle cx="160" cy="345" r="9" fill="#ffd600" opacity="0.7"/>
+  <circle cx="125" cy="285" r="6" fill="#ffd600" opacity="0.5"/>
+</svg>

@@ -628,6 +628,12 @@ class SaveUserRequest(BaseModel):
     mobile: Optional[str] = None
 
 
+class UserSettingsRequest(BaseModel):
+    session_token: str
+    theme: Optional[str] = None
+    font_size: Optional[str] = None
+
+
 class FeedbackRequest(BaseModel):
     email: Optional[str] = None
     message: Optional[str] = None
@@ -999,7 +1005,34 @@ async def lookup_user(request: Request, email: Optional[str] = None, mobile: Opt
     if not token:
         return {"voice_id": None, "session_token": None}
     entry = users["sessions"].get(token, {})
-    return {"voice_id": entry.get("voice_id"), "session_token": token}
+    return {
+        "voice_id": entry.get("voice_id"),
+        "session_token": token,
+        "settings": entry.get("settings", {}),
+    }
+
+
+@app.post("/api/user/settings")
+@limiter.limit("30/hour")
+async def save_user_settings(request: Request, req: UserSettingsRequest):
+    users = _load_users()
+    if req.session_token not in users["sessions"]:
+        raise HTTPException(404, "Session not found")
+    s = users["sessions"][req.session_token].setdefault("settings", {})
+    if req.theme is not None:
+        s["theme"] = req.theme
+    if req.font_size is not None:
+        s["font_size"] = req.font_size
+    _save_users(users)
+    return {"ok": True}
+
+
+@app.get("/api/user/settings")
+@limiter.limit("60/hour")
+async def get_user_settings(request: Request, session_token: str):
+    users = _load_users()
+    entry = users["sessions"].get(session_token, {})
+    return entry.get("settings", {})
 
 
 @app.post("/api/feedback")

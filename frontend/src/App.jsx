@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Landing from './components/Landing'
 import RecordPhase from './components/RecordPhase'
 import CloningPhase from './components/CloningPhase'
 import StoriesPhase from './components/StoriesPhase'
+import SettingsDrawer from './components/SettingsDrawer'
 
 export default function App() {
   const [phase, setPhase] = useState('landing')
@@ -11,6 +12,56 @@ export default function App() {
   const [voiceId, setVoiceId] = useState(() => localStorage.getItem('kidly_voice_id') || '')
   const [sessionToken, setSessionToken] = useState(() => localStorage.getItem('kidly_session_token') || '')
   const [userDisplay, setUserDisplay] = useState(() => localStorage.getItem('kidly_user_display') || '')
+  const [theme, setThemeState] = useState(() => localStorage.getItem('kidly_theme') || 'dark')
+  const [fontSize, setFontSizeState] = useState(() => localStorage.getItem('kidly_font_size') || 'md')
+  const [showSettings, setShowSettings] = useState(false)
+
+  const sessionTokenRef = useRef(sessionToken)
+  useEffect(() => { sessionTokenRef.current = sessionToken }, [sessionToken])
+
+  const applySettings = useCallback((s) => {
+    if (!s) return
+    if (s.theme) { setThemeState(s.theme); localStorage.setItem('kidly_theme', s.theme) }
+    if (s.font_size) { setFontSizeState(s.font_size); localStorage.setItem('kidly_font_size', s.font_size) }
+  }, [])
+
+  const settingsSaveTimer = useRef(null)
+  const setTheme = (t) => {
+    setThemeState(t)
+    localStorage.setItem('kidly_theme', t)
+    clearTimeout(settingsSaveTimer.current)
+    settingsSaveTimer.current = setTimeout(() => {
+      if (!sessionTokenRef.current) return
+      fetch('/api/user/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: sessionTokenRef.current, theme: t }),
+      }).catch(() => {})
+    }, 1500)
+  }
+  const setFontSize = (s) => {
+    setFontSizeState(s)
+    localStorage.setItem('kidly_font_size', s)
+    clearTimeout(settingsSaveTimer.current)
+    settingsSaveTimer.current = setTimeout(() => {
+      if (!sessionTokenRef.current) return
+      fetch('/api/user/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_token: sessionTokenRef.current, font_size: s }),
+      }).catch(() => {})
+    }, 1500)
+  }
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+
+  useEffect(() => {
+    const sizes = { sm: '14px', md: '16px', lg: '19px' }
+    document.documentElement.style.fontSize = sizes[fontSize] || '16px'
+  }, [fontSize])
+
   const [isDemo, setIsDemo] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [voiceJustCreated, setVoiceJustCreated] = useState(false)
@@ -25,9 +76,13 @@ export default function App() {
   const [recordings, setRecordings] = useState([])
 
   useEffect(() => {
-    // Both must be present — if session_token is missing the voice can't be used.
     if (voiceId && sessionToken) {
       setPhase('stories')
+      // Restore server-side settings (may differ from localStorage on a new device)
+      fetch(`/api/user/settings?session_token=${encodeURIComponent(sessionToken)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(applySettings)
+        .catch(() => {})
     } else if (voiceId && !sessionToken) {
       localStorage.removeItem('kidly_voice_id')
       setVoiceId('')
@@ -82,7 +137,7 @@ export default function App() {
       try {
         const r = await fetch(`/api/user/lookup?email=${encodeURIComponent(email.trim())}`)
         if (r.ok) {
-          const { voice_id, session_token } = await r.json()
+          const { voice_id, session_token, settings } = await r.json()
           if (voice_id && session_token) {
             localStorage.setItem('kidly_voice_id', voice_id)
             localStorage.setItem('kidly_session_token', session_token)
@@ -90,6 +145,7 @@ export default function App() {
             setVoiceId(voice_id)
             setSessionToken(session_token)
             setUserDisplay(email.trim())
+            applySettings(settings)
             setIsDemo(false)
             setPhase('stories')
             return
@@ -106,7 +162,7 @@ export default function App() {
       try {
         const r = await fetch(`/api/user/lookup?mobile=${encodeURIComponent(mobile.trim())}`)
         if (r.ok) {
-          const { voice_id, session_token } = await r.json()
+          const { voice_id, session_token, settings } = await r.json()
           if (voice_id && session_token) {
             localStorage.setItem('kidly_voice_id', voice_id)
             localStorage.setItem('kidly_session_token', session_token)
@@ -114,6 +170,7 @@ export default function App() {
             setVoiceId(voice_id)
             setSessionToken(session_token)
             setUserDisplay(mobile.trim())
+            applySettings(settings)
             setIsDemo(false)
             setPhase('stories')
             return
@@ -145,6 +202,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
+      <SettingsDrawer
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        theme={theme}
+        setTheme={setTheme}
+        fontSize={fontSize}
+        setFontSize={setFontSize}
+        userDisplay={userDisplay}
+      />
       {phase === 'landing' && (
         <Landing
           email={email}
@@ -187,6 +253,7 @@ export default function App() {
           userDisplay={userDisplay}
           onReRecord={onReRecord}
           onLogout={onLogout}
+          onOpenSettings={() => setShowSettings(true)}
           voiceJustCreated={voiceJustCreated}
           onToastDismissed={() => setVoiceJustCreated(false)}
         />

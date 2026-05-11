@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Dark background -->
+  <rect width="512" height="512" rx="112" fill="#1e1b4b"/>
+  <!-- Moon shape (crescent via circle subtraction trick) -->
+  <circle cx="256" cy="200" r="120" fill="#ffd600"/>
+  <circle cx="296" cy="168" r="96" fill="#1e1b4b"/>
+  <!-- Stars -->
+  <circle cx="360" cy="300" r="14" fill="#ffd600"/>
+  <circle cx="310" cy="360" r="9" fill="#ffd600" opacity="0.8"/>
+  <circle cx="390" cy="370" r="6" fill="#ffd600" opacity="0.6"/>
+  <circle cx="155" cy="340" r="10" fill="#ffd600" opacity="0.7"/>
+  <circle cx="120" cy="280" r="7" fill="#ffd600" opacity="0.5"/>
+</svg>

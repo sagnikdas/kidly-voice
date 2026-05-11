@@ -2,8 +2,29 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- PWA viewport: cover allows content to extend under notch/home indicator -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- PWA manifest & theme -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#ffd600" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#ffd600" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Kidly" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <!-- App metadata -->
+    <meta name="description" content="Record your voice once. Kidly narrates 15 bedtime stories so your child hears you." />
+    <meta name="application-name" content="Kidly" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- Favicon -->
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+
     <title>Kidly — Bedtime Stories in Your Voice</title>
     <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>

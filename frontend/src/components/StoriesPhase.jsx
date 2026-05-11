@@ -13,7 +13,7 @@ const CATEGORY_MORALS = {
 }
 
 
-export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, userDisplay, onReRecord, onLogout, voiceJustCreated, onToastDismissed }) {
+export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, userDisplay, onReRecord, onLogout, onOpenSettings, voiceJustCreated, onToastDismissed }) {
   const [playedKeys, setPlayedKeys] = useState(new Set())
   const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, alignment, text }
   const [loadingKey, setLoadingKey] = useState(null)
@@ -122,6 +122,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
           audioUrl={readerState.audioUrl}
           alignment={readerState.alignment}
           onClose={() => setReaderState(null)}
+          onOpenSettings={onOpenSettings}
         />
       )}
 
@@ -158,25 +159,27 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
         </div>
       )}
 
-      <div className={`min-h-screen bg-background text-on-surface pb-10 ${isDemo ? 'pt-16' : ''}`}>
+      <div className={`min-h-screen bg-background text-on-surface ${isDemo ? 'pt-16' : ''}`} style={{paddingBottom:'calc(100px + var(--sab))'}}>
         {/* Top bar */}
-        <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-14 bg-surface border-b border-outline-variant/20" style={{top: isDemo ? 48 : 0}}>
+        <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 bg-surface border-b border-outline-variant/20 h-header safe-top" style={{top: isDemo ? 48 : 0}}>
           <span className="text-lg font-bold text-primary-container">Kidly</span>
           <div className="flex items-center gap-3 min-w-0">
             {userDisplay && (
-              <span className="text-xs text-on-surface-variant truncate max-w-[160px]">{userDisplay}</span>
+              <span className="text-xs text-primary-container truncate max-w-[140px]">{userDisplay}</span>
             )}
-            <button
-              onClick={onLogout}
-              className="flex items-center gap-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors shrink-0"
-            >
+            <button onClick={onLogout}
+              className="flex items-center gap-1 text-xs text-primary-container active:opacity-70 transition-opacity shrink-0 min-h-[44px] px-2">
               <span className="material-symbols-outlined" style={{fontSize:14}}>logout</span>
               Logout
+            </button>
+            <button onClick={onOpenSettings}
+              className="flex items-center justify-center text-primary-container active:opacity-70 transition-opacity shrink-0 min-w-[44px] min-h-[44px]">
+              <span className="material-symbols-outlined" style={{fontSize:22}}>settings</span>
             </button>
           </div>
         </header>
 
-        <main className="max-w-[800px] mx-auto px-6 pt-20">
+        <main className="max-w-[800px] mx-auto px-6 pt-header">
           {/* Mascot greeting */}
           <div className="flex items-center gap-5 mb-6 bg-surface-container-low p-5 rounded-xl border-b-4 border-surface-container-highest">
             <div className="text-5xl shrink-0">🦉</div>
@@ -251,8 +254,8 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
         {selectedKey && (() => {
           const sel = STORIES.find(s => s.key === selectedKey)
           return (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-on-primary-container"
-                 style={{background:'var(--color-primary-container, #ffd600)', boxShadow:'0 4px 20px rgba(255,214,0,0.4)'}}>
+            <div className="fixed left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-on-primary-container"
+                 style={{bottom:'calc(24px + var(--sab))', background:'var(--color-primary-container, #ffd600)', boxShadow:'0 4px 20px rgba(255,214,0,0.4)'}}>
               <span className="text-2xl leading-none select-none">{sel?.emoji}</span>
               <span className="text-sm font-bold max-w-[160px] truncate">{sel?.title}</span>
               <button

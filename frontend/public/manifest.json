@@ -1,0 +1,25 @@
+{
+  "name": "Kidly — Bedtime Stories in Your Voice",
+  "short_name": "Kidly",
+  "description": "Record your voice once. Kidly narrates 15 bedtime stories so your child hears you.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#161309",
+  "theme_color": "#ffd600",
+  "orientation": "portrait-primary",
+  "categories": ["entertainment", "kids"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
