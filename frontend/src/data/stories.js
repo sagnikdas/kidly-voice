@@ -8,7 +8,7 @@ export const STORIES = [
   { key: 'turtle',     emoji: '🐢', title: 'Tuku and the Impossible Hill',    subtitle: 'One step at a time',                  moral: 'perseverance',   ageRange: '4–6' },
   { key: 'mango',      emoji: '🥭', title: "Maya's Mango Wish",               subtitle: 'The gift of remembering',             moral: 'gratitude',      ageRange: '4–7' },
   { key: 'lighthouse', emoji: '🏮', title: 'The Lonely Lighthouse',           subtitle: 'Being seen for what you do',          moral: 'helpfulness',    ageRange: '4–7' },
-  { key: 'smile',      emoji: '🌸', title: "Where Did Priya's Smile Go?",     subtitle: 'The kindness of just staying',        moral: 'empathy',        ageRange: '5–8' },
+  { key: 'smile',      emoji: '🌻', title: "Leena and the New Kid",           subtitle: 'Being seen changes everything',        moral: 'empathy',        ageRange: '4–7' },
   { key: 'painter',    emoji: '🎨', title: 'The Boy Who Painted Stars',       subtitle: 'Art is feeling, not perfection',      moral: 'creativity',     ageRange: '5–8' },
   { key: 'blanket',    emoji: '🧡', title: "Nani's Warm Blanket",             subtitle: 'Love stitched in every thread',       moral: 'love',           ageRange: '3–6' },
   { key: 'firefly',    emoji: '✨', title: 'The Firefly Who Forgot to Shine', subtitle: 'Your light is the right light',       moral: 'self-worth',     ageRange: '3–6' },

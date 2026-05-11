@@ -126,15 +126,16 @@ for d in [REC_DIR, TTS_DIR]:
 
 
 def _load_users() -> dict:
-    """Returns {"sessions": {token: entry}, "email_index": {email: token}}."""
+    """Returns {"sessions": {token: entry}, "email_index": {email: token}, "mobile_index": {mobile: token}}."""
     if USERS_FILE.exists():
         try:
             data = json.loads(USERS_FILE.read_text())
             if "sessions" in data:
+                data.setdefault("mobile_index", {})
                 return data
         except Exception:
             pass
-    return {"sessions": {}, "email_index": {}}
+    return {"sessions": {}, "email_index": {}, "mobile_index": {}}
 
 
 def _save_users(users: dict):
@@ -402,30 +403,28 @@ STORIES: dict[str, dict] = {
         ),
     },
     "smile": {
-        "title": "Where Did Priya's Smile Go?",
+        "title": "Leena and the New Kid",
         "content": (
-            "Everyone at Priya's school knew that Priya had the best smile — wide and bright, "
-            "like a window suddenly thrown open to the sun.\n\n"
-            "But one morning, Priya came to school without it.\n\n"
-            "She sat quietly at her desk. She did not raise her hand. At recess, she stood by the fence alone, "
-            "watching the others play.\n\n"
-            "Her friend Rohan noticed.\n\n"
-            "He went and stood beside her — not asking questions, not pulling her to come play. "
-            "Just standing there, close enough that their shoulders were almost touching.\n\n"
-            "\"I am here,\" he said. Just that.\n\n"
-            "Priya did not say anything for a while.\n\n"
-            "Then, quietly: \"Dadi passed away last night. My grandmother. She lived far away and I never got to say goodbye.\"\n\n"
-            "Rohan did not say it will be okay. He did not say at least she lived a long life. He just said:\n\n"
-            "\"I am really sorry, Priya. She must have loved you very much.\"\n\n"
-            "Priya nodded. Her eyes filled with tears, and she let them come.\n\n"
-            "They stood together by the fence until the bell rang.\n\n"
-            "That afternoon, Priya's smile did not come back — and that was okay. "
-            "Some days are not smiling days, and that is allowed.\n\n"
-            "But on Friday, when Rohan saved her the window seat on the bus, "
-            "Priya gave him a small, quiet smile. Not the wide one. But real.\n\n"
-            "\"Thank you for just being there,\" she said.\n\n"
-            "Sometimes kindness is not fixing things. Sometimes it is just staying.\n\n"
-            "Goodnight, little one. Be the person who stays. It is enough."
+            "The day Anya arrived at Sunflower Primary, everyone was busy being busy.\n\n"
+            "Busy talking to their own friends, busy finding their own seats, busy opening their own lunchboxes.\n\n"
+            "No one noticed the girl with the yellow backpack standing at the door — until Leena did.\n\n"
+            "Anya's eyes were very round and very still, the way a sparrow looks when it lands somewhere new "
+            "and is not sure yet if it is safe.\n\n"
+            "Leena slid her chair to the side, just a little.\n\n"
+            "\"You can sit here,\" she said. \"The sun comes through this window at lunch. "
+            "It feels like warm honey on your face.\"\n\n"
+            "Anya sat down. She did not say anything at first. "
+            "But she also stopped looking like a sparrow who might fly away.\n\n"
+            "At lunch, Leena showed Anya where the good climbing tree was, "
+            "and which water tap ran cold, and how to say thank you in three languages she had learned from friends.\n\n"
+            "\"How do you know so many things?\" Anya asked.\n\n"
+            "Leena thought about it. \"Because someone showed me, when I was new.\"\n\n"
+            "Anya smiled then — a slow smile, like a door opening just a crack, then all the way.\n\n"
+            "By the end of the day, Anya had learned two new words in Tamil, "
+            "and Leena had learned that Anya could whistle with two fingers.\n\n"
+            "Neither of them felt like a stranger anymore.\n\n"
+            "Goodnight, little one. When someone is new, be the one who slides their chair over. "
+            "It costs nothing, and means everything."
         ),
     },
     "painter": {
@@ -624,8 +623,9 @@ class SpeakRequest(BaseModel):
 
 
 class SaveUserRequest(BaseModel):
-    email: str
     session_token: str
+    email: Optional[str] = None
+    mobile: Optional[str] = None
 
 
 class FeedbackRequest(BaseModel):
@@ -962,25 +962,40 @@ async def get_audio(filename: str):
 @app.post("/api/user/save")
 @limiter.limit(RL_USER_SAVE)
 async def save_user(request: Request, req: SaveUserRequest):
-    email = req.email.lower().strip()
-    if not email or not req.session_token:
-        raise HTTPException(400, "email and session_token are required")
+    if not req.email and not req.mobile:
+        raise HTTPException(400, "email or mobile is required")
+    if not req.session_token:
+        raise HTTPException(400, "session_token is required")
     users = _load_users()
     if req.session_token not in users["sessions"]:
         raise HTTPException(404, "Session not found — please re-record your voice.")
-    users["sessions"][req.session_token]["email"] = email
-    users["sessions"][req.session_token]["updated_at"] = datetime.now(timezone.utc).isoformat()
-    users["email_index"][email] = req.session_token
+    now = datetime.now(timezone.utc).isoformat()
+    if req.email:
+        email = req.email.lower().strip()
+        users["sessions"][req.session_token]["email"] = email
+        users["email_index"][email] = req.session_token
+        log.warning("[USER SAVE] email=%s", email)
+    if req.mobile:
+        mobile = req.mobile.strip()
+        users["sessions"][req.session_token]["mobile"] = mobile
+        users["mobile_index"][mobile] = req.session_token
+        log.warning("[USER SAVE] mobile=%s", mobile)
+    users["sessions"][req.session_token]["updated_at"] = now
     _save_users(users)
-    log.warning("[NEW USER] email=%s", email)
     return {"ok": True}
 
 
 @app.get("/api/user/lookup")
 @limiter.limit(RL_USER_LOOKUP)
-async def lookup_user(request: Request, email: str):
+async def lookup_user(request: Request, email: Optional[str] = None, mobile: Optional[str] = None):
+    if not email and not mobile:
+        raise HTTPException(400, "email or mobile is required")
     users = _load_users()
-    token = users["email_index"].get(email.lower().strip())
+    token = None
+    if email:
+        token = users["email_index"].get(email.lower().strip())
+    if not token and mobile:
+        token = users["mobile_index"].get(mobile.strip())
     if not token:
         return {"voice_id": None, "session_token": None}
     entry = users["sessions"].get(token, {})
@@ -1022,80 +1037,6 @@ async def get_default_voice(request: Request):
 
 
 # ── TEMPORARY debug endpoints — remove before launch ──────────────────────────
-
-class DebugSpeakRequest(BaseModel):
-    voice_id: str
-    story_key: str
-
-
-@app.get("/api/debug/voices")
-async def debug_list_voices(request: Request):
-    """TEMP: List own + popular Fish Audio voices for voice-testing."""
-    if not FA_KEY:
-        raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
-    import asyncio
-    async with httpx.AsyncClient(timeout=30) as client:
-        own_r, pub_r = await asyncio.gather(
-            client.get(
-                "https://api.fish.audio/model",
-                headers={"Authorization": f"Bearer {FA_KEY}"},
-                params={"self": "true", "page_size": 50, "page_number": 1},
-            ),
-            client.get(
-                "https://api.fish.audio/model",
-                headers={"Authorization": f"Bearer {FA_KEY}"},
-                params={"page_size": 40, "page_number": 1, "sort_by": "score", "language": "en"},
-            ),
-        )
-    own_items = own_r.json().get("items", []) if own_r.status_code == 200 else []
-    pub_items = pub_r.json().get("items", []) if pub_r.status_code == 200 else []
-
-    def fmt(v, group):
-        return {"voice_id": v["_id"], "name": v.get("title", "Unnamed"), "group": group}
-
-    return {
-        "voices": [fmt(v, "My voices") for v in own_items]
-                + [fmt(v, "Fish Audio") for v in pub_items]
-    }
-
-
-@app.post("/api/debug/speak")
-async def debug_speak(request: Request, req: DebugSpeakRequest):
-    """TEMP: TTS with any voice_id, no session validation."""
-    if not FA_KEY:
-        raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
-    story = STORIES.get(req.story_key)
-    if not story:
-        raise HTTPException(404, f"Unknown story: {req.story_key}")
-
-    cache_key = hashlib.sha256(
-        f"ts:{req.voice_id}:{req.story_key}:fa:mp3:{FA_TTS_BITRATE}".encode()
-    ).hexdigest()[:20]
-    audio_path = TTS_DIR / f"{cache_key}.mp3"
-
-    if not audio_path.exists():
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
-                "https://api.fish.audio/v1/tts",
-                headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
-                json={
-                    "text": story["content"],
-                    "reference_id": req.voice_id,
-                    "format": "mp3",
-                    "mp3_bitrate": FA_TTS_BITRATE,
-                    "latency": "normal",
-                },
-            )
-            if r.status_code >= 400:
-                raise HTTPException(r.status_code, r.text)
-            audio_path.write_bytes(r.content)
-
-    return {
-        "audio_url": f"/api/audio/{cache_key}.mp3",
-        "alignment": None,
-        "story_text": story["content"],
-    }
-
 
 # ── Voice management (admin) ───────────────────────────────────────────────────
 

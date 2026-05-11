@@ -7,8 +7,10 @@ import StoriesPhase from './components/StoriesPhase'
 export default function App() {
   const [phase, setPhase] = useState('landing')
   const [email, setEmail] = useState('')
+  const [mobile, setMobile] = useState('')
   const [voiceId, setVoiceId] = useState(() => localStorage.getItem('kidly_voice_id') || '')
   const [sessionToken, setSessionToken] = useState(() => localStorage.getItem('kidly_session_token') || '')
+  const [userDisplay, setUserDisplay] = useState(() => localStorage.getItem('kidly_user_display') || '')
   const [isDemo, setIsDemo] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [voiceJustCreated, setVoiceJustCreated] = useState(false)
@@ -35,6 +37,8 @@ export default function App() {
   const onVoiceReady = (id, token) => {
     localStorage.setItem('kidly_voice_id', id)
     localStorage.setItem('kidly_session_token', token)
+    const display = email.trim() || mobile.trim()
+    if (display) { localStorage.setItem('kidly_user_display', display); setUserDisplay(display) }
     setVoiceId(id)
     setSessionToken(token)
     setVoiceJustCreated(true)
@@ -52,15 +56,28 @@ export default function App() {
     setVoiceJustCreated(false)
     setRecordings([])
     setPhase('record')
-    // Never delete the shared demo voice from ElevenLabs.
     if (oldVoiceId && !wasDemo) {
       fetch(`/api/admin/voices/${oldVoiceId}`, { method: 'DELETE' }).catch(() => {})
     }
   }
 
+  const onLogout = () => {
+    localStorage.removeItem('kidly_voice_id')
+    localStorage.removeItem('kidly_session_token')
+    localStorage.removeItem('kidly_user_display')
+    setVoiceId('')
+    setSessionToken('')
+    setEmail('')
+    setMobile('')
+    setUserDisplay('')
+    setIsDemo(false)
+    setVoiceJustCreated(false)
+    setRecordings([])
+    setPhase('landing')
+  }
+
   const onStart = async () => {
     if (email.trim()) {
-      // Try to restore a saved voice for this email.
       setRestoring(true)
       try {
         const r = await fetch(`/api/user/lookup?email=${encodeURIComponent(email.trim())}`)
@@ -69,8 +86,10 @@ export default function App() {
           if (voice_id && session_token) {
             localStorage.setItem('kidly_voice_id', voice_id)
             localStorage.setItem('kidly_session_token', session_token)
+            localStorage.setItem('kidly_user_display', email.trim())
             setVoiceId(voice_id)
             setSessionToken(session_token)
+            setUserDisplay(email.trim())
             setIsDemo(false)
             setPhase('stories')
             return
@@ -78,12 +97,35 @@ export default function App() {
         }
       } catch {}
       finally { setRestoring(false) }
-      // Email not found — go to record flow.
       setPhase('record')
       return
     }
 
-    // No email — try the demo voice so users can experience the product first.
+    if (mobile.trim()) {
+      setRestoring(true)
+      try {
+        const r = await fetch(`/api/user/lookup?mobile=${encodeURIComponent(mobile.trim())}`)
+        if (r.ok) {
+          const { voice_id, session_token } = await r.json()
+          if (voice_id && session_token) {
+            localStorage.setItem('kidly_voice_id', voice_id)
+            localStorage.setItem('kidly_session_token', session_token)
+            localStorage.setItem('kidly_user_display', mobile.trim())
+            setVoiceId(voice_id)
+            setSessionToken(session_token)
+            setUserDisplay(mobile.trim())
+            setIsDemo(false)
+            setPhase('stories')
+            return
+          }
+        }
+      } catch {}
+      finally { setRestoring(false) }
+      setPhase('record')
+      return
+    }
+
+    // No identifier — try the demo voice.
     try {
       const r = await fetch('/api/voice/default')
       if (r.ok) {
@@ -98,7 +140,6 @@ export default function App() {
       }
     } catch {}
 
-    // Demo mode disabled or unavailable — go straight to recording.
     setPhase('record')
   }
 
@@ -108,8 +149,12 @@ export default function App() {
         <Landing
           email={email}
           setEmail={setEmail}
+          mobile={mobile}
+          setMobile={setMobile}
           restoring={restoring}
           onStart={onStart}
+          canGoToStories={!!(voiceId && sessionToken)}
+          onGoToStories={() => setPhase('stories')}
         />
       )}
       {phase === 'record' && (
@@ -127,6 +172,7 @@ export default function App() {
           sessionId={sessionId}
           recordings={recordings}
           email={email}
+          mobile={mobile}
           onVoiceReady={onVoiceReady}
           onBack={() => setPhase('record')}
         />
@@ -138,7 +184,9 @@ export default function App() {
           isDemo={isDemo}
           email={email}
           setEmail={setEmail}
+          userDisplay={userDisplay}
           onReRecord={onReRecord}
+          onLogout={onLogout}
           voiceJustCreated={voiceJustCreated}
           onToastDismissed={() => setVoiceJustCreated(false)}
         />

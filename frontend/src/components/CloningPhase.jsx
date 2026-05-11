@@ -6,7 +6,7 @@ const STEPS = [
   { label: 'Your voice is ready!' },
 ]
 
-export default function CloningPhase({ sessionId, recordings, email: initialEmail, onVoiceReady, onBack }) {
+export default function CloningPhase({ sessionId, recordings, email: initialEmail, mobile: initialMobile, onVoiceReady, onBack }) {
   const [stepIdx, setStepIdx] = useState(0)
   const [err, setErr] = useState('')
   const [retryCount, setRetryCount] = useState(0)
@@ -81,19 +81,16 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
 
       if (runGenRef.current !== gen) return
 
-      // Kick off background TTS pre-generation for all stories (fire-and-forget).
-      fetch('/api/stories/preload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id, session_token }),
-      }).catch(() => {})
-
-      // If email was already provided on landing, save immediately.
-      if (initialEmail) {
+      // Save email and/or mobile provided on the landing screen.
+      if (initialEmail || initialMobile) {
         fetch('/api/user/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: initialEmail, session_token }),
+          body: JSON.stringify({
+            session_token,
+            ...(initialEmail ? { email: initialEmail } : {}),
+            ...(initialMobile ? { mobile: initialMobile } : {}),
+          }),
         }).catch(() => {})
         setEmailSaved(true)
       }

@@ -55,6 +55,7 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
   const [duration, setDuration] = useState(0)
 
   const audioRef = useRef(null)
+  const progressBarRef = useRef(null)
   const wordRefs = useRef([])
   const wordTimings = useMemo(() => {
     if (alignment?.characters) return buildWordTimings(alignment)
@@ -113,12 +114,12 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
   const togglePlay = () =>
     audioRef.current?.paused ? audioRef.current.play() : audioRef.current?.pause()
 
-  const seek = (e) => {
-    if (!duration) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    if (audioRef.current) audioRef.current.currentTime = ratio * duration
-  }
+  const seekToClient = useCallback((clientX) => {
+    if (!duration || !audioRef.current || !progressBarRef.current) return
+    const rect = progressBarRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    audioRef.current.currentTime = ratio * duration
+  }, [duration])
 
   // Render text with per-word spans
   const paragraphs = text.split(/\n\n+/)
@@ -157,10 +158,14 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
     <div className="fixed inset-0 z-50 flex flex-col bg-background text-on-surface">
       {/* Header */}
       <header className="fixed top-0 w-full z-10 flex justify-between items-center px-5 h-14 bg-surface border-b border-outline-variant/20">
-        <button onClick={onClose} className="flex items-center gap-1 text-sm text-on-surface-variant hover:text-on-surface transition-colors">
-          <span className="material-symbols-outlined">arrow_back_ios_new</span>
-          <span className="font-medium text-primary-container">Kidly</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="flex items-center hover:opacity-75 transition-opacity">
+            <span className="material-symbols-outlined text-on-surface-variant">arrow_back_ios_new</span>
+          </button>
+          <button onClick={onClose} className="text-2xl font-extrabold text-primary-container tracking-tight hover:opacity-75 transition-opacity">
+            Kidly
+          </button>
+        </div>
         <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-high rounded-full border border-outline-variant/30">
           <span className="material-symbols-outlined ms-fill text-secondary text-base">record_voice_over</span>
           <span className="text-xs font-bold text-secondary">In Your Voice</span>
@@ -193,15 +198,23 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
 
         {/* Progress bar */}
         <div className="w-full max-w-[600px] mx-auto px-5 mb-4">
-          <div className="relative h-3 w-full bg-surface-container-highest rounded-full overflow-visible cursor-pointer" onClick={seek}>
-            <div className="absolute top-0 left-0 h-full bg-secondary rounded-full transition-all" style={{width:`${progress}%`, boxShadow:'0 0 12px rgba(127,214,195,0.5)'}} />
+          {/* Tall invisible hit-area, thin visual track inside */}
+          <div
+            ref={progressBarRef}
+            className="relative flex items-center w-full h-8 cursor-pointer"
+            onMouseDown={e => seekToClient(e.clientX)}
+            onTouchStart={e => seekToClient(e.touches[0].clientX)}
+          >
+            <div className="pointer-events-none absolute w-full h-3 bg-surface-container-highest rounded-full overflow-hidden">
+              <div className="h-full bg-secondary rounded-full" style={{width:`${progress}%`, boxShadow:'0 0 12px rgba(127,214,195,0.5)', transition:'width 0.1s linear'}} />
+            </div>
             {progress > 0 && (
-              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 bg-primary-container rounded-full flex items-center justify-center border-2 border-on-primary" style={{left:`${progress}%`}}>
+              <div className="pointer-events-none absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 bg-primary-container rounded-full flex items-center justify-center border-2 border-on-primary" style={{left:`${progress}%`}}>
                 <span className="material-symbols-outlined ms-fill text-on-primary-container" style={{fontSize:14}}>star</span>
               </div>
             )}
           </div>
-          <div className="flex justify-between mt-1.5 text-xs text-on-surface-variant font-mono">
+          <div className="flex justify-between text-xs text-on-surface-variant font-mono">
             <span>{fmt(currentTime)}</span>
             <span>{fmt(duration)}</span>
           </div>
@@ -215,11 +228,7 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose 
           <button onClick={() => { if(audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 10) }}
             className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-3 rounded-full border border-outline-variant/20 text-sm font-medium transition-all active:scale-95">
             <span className="material-symbols-outlined text-secondary text-base">replay_10</span>
-            <span className="text-xs">Replay</span>
-          </button>
-          <button className="flex items-center gap-2 bg-surface-container-high text-on-surface px-4 py-3 rounded-full border border-outline-variant/20 text-sm font-medium transition-all active:scale-95">
-            <span className="material-symbols-outlined text-tertiary-fixed-dim text-base">bedtime</span>
-            <span className="text-xs">Sleepy Mode</span>
+            <span className="text-xs">Replay 10s</span>
           </button>
         </div>
         {/* Main playback */}

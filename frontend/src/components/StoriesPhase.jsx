@@ -12,41 +12,15 @@ const CATEGORY_MORALS = {
   '✨ Heartfelt': ['creativity', 'self-worth', 'generosity'],
 }
 
-function VoiceSelect({ value, options, onChange }) {
-  const groups = options.reduce((g, v) => {
-    ;(g[v.group] = g[v.group] || []).push(v)
-    return g
-  }, {})
-  return (
-    <select
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      className="flex-1 text-sm border border-outline-variant rounded-lg px-2 py-1.5 bg-surface-container text-on-surface outline-none focus:border-primary-container"
-    >
-      <option value="">My cloned voice</option>
-      {Object.entries(groups).map(([group, voices]) => (
-        <optgroup key={group} label={group}>
-          {voices.map(v => (
-            <option key={v.voice_id} value={v.voice_id}>{v.name}</option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
-  )
-}
 
-export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, onReRecord, voiceJustCreated, onToastDismissed }) {
+export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, userDisplay, onReRecord, onLogout, voiceJustCreated, onToastDismissed }) {
   const [playedKeys, setPlayedKeys] = useState(new Set())
   const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, alignment, text }
   const [loadingKey, setLoadingKey] = useState(null)
+  const [selectedKey, setSelectedKey] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [readerState, setReaderState] = useState(null)   // { title, text, audioUrl, alignment }
-  const [preloadStatus, setPreloadStatus] = useState({ total: 0, ready: 0, done: false })
   const [showCustomModal, setShowCustomModal] = useState(false)
-
-  // TEMP: voice picker for testing
-  const [testVoiceId, setTestVoiceId] = useState('')
-  const [voiceOptions, setVoiceOptions] = useState([])
 
   // Feedback state
   const [feedbackEmail, setFeedbackEmail] = useState(email || '')
@@ -67,37 +41,8 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     setAudioCache({})
     setReaderState(null)
     setLoadError('')
-    setPreloadStatus({ total: 0, ready: 0, done: false })
+    setSelectedKey(null)
   }, [voiceId])
-
-  // Poll preload status until all stories are ready.
-  useEffect(() => {
-    if (!voiceId || isDemo) return
-    let cancelled = false
-
-    const poll = async () => {
-      try {
-        const r = await fetch(`/api/stories/preload-status?voice_id=${voiceId}`)
-        if (!r.ok || cancelled) return
-        const data = await r.json()
-        if (!cancelled) {
-          setPreloadStatus(data)
-          if (!data.done) setTimeout(poll, 2000)
-        }
-      } catch {}
-    }
-
-    poll()
-    return () => { cancelled = true }
-  }, [voiceId, isDemo])
-
-  // TEMP: load Fish Audio voice list for testing
-  useEffect(() => {
-    fetch('/api/debug/voices')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.voices) setVoiceOptions(data.voices) })
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (!voiceJustCreated) return
@@ -110,8 +55,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
   const handlePlayClick = async (story) => {
     if (!voiceId) { setLoadError('No voice found — please re-record.'); return }
 
-    const effectiveVoiceId = testVoiceId || voiceId
-    const cacheKey = `${effectiveVoiceId}:${story.key}`
+    const cacheKey = `${voiceId}:${story.key}`
 
     // Serve from in-session cache — no network call needed.
     if (audioCache[cacheKey]) {
@@ -122,21 +66,11 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     setLoadingKey(story.key)
     setLoadError('')
     try {
-      let r
-      if (testVoiceId) {
-        // TEMP: use debug endpoint that skips session validation
-        r = await fetch('/api/debug/speak', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ voice_id: testVoiceId, story_key: story.key }),
-        })
-      } else {
-        r = await fetch('/api/stories/speak-timestamped', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ voice_id: voiceId, story_key: story.key, session_token: sessionToken }),
-        })
-      }
+      const r = await fetch('/api/stories/speak-timestamped', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice_id: voiceId, story_key: story.key, session_token: sessionToken }),
+      })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || 'Failed to load story')
@@ -224,16 +158,21 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
         </div>
       )}
 
-      <div className={`min-h-screen bg-background text-on-surface pb-32 ${isDemo ? 'pt-16' : ''}`}>
+      <div className={`min-h-screen bg-background text-on-surface pb-10 ${isDemo ? 'pt-16' : ''}`}>
         {/* Top bar */}
         <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-14 bg-surface border-b border-outline-variant/20" style={{top: isDemo ? 48 : 0}}>
           <span className="text-lg font-bold text-primary-container">Kidly</span>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container-high rounded-full border border-outline-variant/30">
-              <span className="material-symbols-outlined ms-fill text-primary-container text-base">lock</span>
-              <span className="text-xs font-bold text-on-surface">Kid-Lock</span>
-            </div>
-            <button onClick={onReRecord} className="text-xs text-on-surface-variant hover:text-on-surface underline">Re-record</button>
+          <div className="flex items-center gap-3 min-w-0">
+            {userDisplay && (
+              <span className="text-xs text-on-surface-variant truncate max-w-[160px]">{userDisplay}</span>
+            )}
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1 text-xs text-on-surface-variant hover:text-on-surface transition-colors shrink-0"
+            >
+              <span className="material-symbols-outlined" style={{fontSize:14}}>logout</span>
+              Logout
+            </button>
           </div>
         </header>
 
@@ -247,28 +186,11 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
             </div>
           </div>
 
-          {/* Preload status */}
-          {preloadStatus.total > 0 && !preloadStatus.done && (
-            <div className="mb-4 flex items-center gap-2 bg-surface-container border border-outline-variant/20 rounded-xl px-4 py-2.5 text-sm text-secondary-fixed">
-              <span className="w-3.5 h-3.5 border-2 border-secondary-fixed border-t-transparent rounded-full animate-spin shrink-0" />
-              <span>Preparing stories… <strong>{preloadStatus.ready}/{preloadStatus.total}</strong> ready</span>
-            </div>
-          )}
-
           {/* Error banner */}
           {loadError && (
             <div className="mb-4 bg-error-container/20 border border-error/30 rounded-xl px-4 py-3 text-error text-sm flex items-center justify-between">
               <span>{loadError}</span>
               <button onClick={() => setLoadError('')} className="ml-4 text-error hover:text-on-surface">✕</button>
-            </div>
-          )}
-
-          {/* Voice picker (testing - keep same logic) */}
-          {voiceOptions.length > 0 && (
-            <div className="mb-4 flex items-center gap-3 bg-surface-container border border-outline-variant/20 rounded-xl px-4 py-3">
-              <span className="text-xs font-semibold text-secondary-fixed shrink-0">🧪 Test voice</span>
-              <VoiceSelect value={testVoiceId} options={voiceOptions} onChange={v => { setTestVoiceId(v); setAudioCache({}) }} />
-              {testVoiceId && <button onClick={() => { setTestVoiceId(''); setAudioCache({}) }} className="text-xs text-on-surface-variant hover:text-error shrink-0">✕ Reset</button>}
             </div>
           )}
 
@@ -288,17 +210,17 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
             </div>
           </div>
 
-          {/* Stories bento grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            {/* Featured first story */}
-            {filteredStories.length > 0 && (
-              <div className="sm:col-span-2">
-                <StoryCard story={filteredStories[0]} hasPlayed={playedKeys.has(filteredStories[0].key)} loading={loadingKey === filteredStories[0].key} onPlayClick={handlePlayClick} featured={true} />
-              </div>
-            )}
-            {/* Rest of stories */}
-            {filteredStories.slice(1).map(story => (
-              <StoryCard key={story.key} story={story} hasPlayed={playedKeys.has(story.key)} loading={loadingKey === story.key} onPlayClick={handlePlayClick} />
+          {/* Stories grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+            {filteredStories.map(story => (
+              <StoryCard
+                key={story.key}
+                story={story}
+                hasPlayed={playedKeys.has(story.key)}
+                loading={loadingKey === story.key}
+                onPlayClick={s => setSelectedKey(s.key)}
+                isSelected={selectedKey === story.key}
+              />
             ))}
           </div>
 
@@ -325,25 +247,32 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
           )}
         </main>
 
-        {/* Bottom nav */}
-        <nav className="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pt-3 pb-8 bg-surface-container-high rounded-t-xl" style={{boxShadow: '0 -4px 20px rgba(255,214,0,0.1)'}}>
-          <div className="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-xl px-5 py-2 btn-3d-sm">
-            <span className="material-symbols-outlined ms-fill text-xl">auto_stories</span>
-            <span className="text-[10px] font-bold">Library</span>
-          </div>
-          <button onClick={() => setShowCustomModal(true)} className="flex flex-col items-center justify-center text-on-surface-variant px-4 py-2 hover:text-primary-fixed transition-colors">
-            <span className="material-symbols-outlined text-xl">magic_button</span>
-            <span className="text-[10px] font-bold">Custom</span>
-          </button>
-          <button onClick={onReRecord} className="flex flex-col items-center justify-center text-on-surface-variant px-4 py-2 hover:text-primary-fixed transition-colors">
-            <span className="material-symbols-outlined text-xl">mic</span>
-            <span className="text-[10px] font-bold">Re-record</span>
-          </button>
-          <div className="flex flex-col items-center justify-center text-on-surface-variant px-4 py-2">
-            <span className="material-symbols-outlined text-xl">space_dashboard</span>
-            <span className="text-[10px] font-bold">Dashboard</span>
-          </div>
-        </nav>
+        {/* Go bar — appears when a story is selected */}
+        {selectedKey && (() => {
+          const sel = STORIES.find(s => s.key === selectedKey)
+          return (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-on-primary-container"
+                 style={{background:'var(--color-primary-container, #ffd600)', boxShadow:'0 4px 20px rgba(255,214,0,0.4)'}}>
+              <span className="text-2xl leading-none select-none">{sel?.emoji}</span>
+              <span className="text-sm font-bold max-w-[160px] truncate">{sel?.title}</span>
+              <button
+                onClick={() => sel && handlePlayClick(sel)}
+                disabled={!!loadingKey}
+                className="ml-1 flex items-center gap-1.5 bg-black/20 hover:bg-black/30 disabled:opacity-50 px-4 py-1.5 rounded-full text-sm font-bold transition-colors"
+              >
+                {loadingKey ? (
+                  <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined ms-fill text-base">play_arrow</span>
+                    Go
+                  </>
+                )}
+              </button>
+            </div>
+          )
+        })()}
+
       </div>
     </>
   )
