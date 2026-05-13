@@ -21,6 +21,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     try { const s = localStorage.getItem(`kidly_cached_${voiceId}`); return new Set(s ? JSON.parse(s) : []) }
     catch { return new Set() }
   })
+  const [cachedChecked, setCachedChecked] = useState(false) // true after first server fetch; gates the progress banner
   const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, alignment, text }
   const [loadingKey, setLoadingKey] = useState(null)
   const [selectedKey, setSelectedKey] = useState(null)
@@ -46,6 +47,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     catch { setPlayedKeys(new Set()) }
     try { const s = localStorage.getItem(`kidly_cached_${voiceId}`); setCachedKeys(new Set(s ? JSON.parse(s) : [])) }
     catch { setCachedKeys(new Set()) }
+    setCachedChecked(false)
     setAudioCache({})
     setReaderState(null)
     setLoadError('')
@@ -63,13 +65,15 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     localStorage.setItem(`kidly_cached_${voiceId}`, JSON.stringify([...cachedKeys]))
   }, [cachedKeys, voiceId])
 
-  // On mount, fetch ground-truth cached list from server (catches stories cached on another device)
+  // On mount, fetch ground-truth cached list from server (catches stories cached on another device).
+  // Sets cachedChecked=true so the progress banner only appears after we know the real count.
   useEffect(() => {
     if (!voiceId || !sessionToken) return
     fetch(`/api/stories/cached?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.cached) setCachedKeys(new Set(data.cached)) })
       .catch(() => {})
+      .finally(() => setCachedChecked(true))
   }, [voiceId, sessionToken])
 
   // Poll preload-status while background generation is running, updating ⚡ badges live.
@@ -252,8 +256,8 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
             </div>
           </div>
 
-          {/* Story generation progress — shown while preload is still running */}
-          {!isDemo && cachedKeys.size < STORIES.length && (
+          {/* Story generation progress — only shown after server confirms count, and only if not all ready */}
+          {!isDemo && cachedChecked && cachedKeys.size < STORIES.length && (
             <div className="mb-4 flex items-center gap-2.5 bg-surface-container-high border border-outline-variant/20 rounded-xl px-4 py-2.5">
               <span className="w-3 h-3 border-2 border-on-surface-variant/30 border-t-on-surface-variant rounded-full animate-spin shrink-0" />
               <span className="text-xs text-on-surface-variant">
