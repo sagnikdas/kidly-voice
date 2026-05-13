@@ -178,7 +178,7 @@ function RecordLive({ onReady }) {
   }
 
   const durationSec = take ? take.ms / 1000 : 0
-  const hasEnough   = durationSec >= 30
+  const hasEnough   = durationSec >= 60
 
   return (
     <div className="w-full space-y-5">
@@ -232,7 +232,7 @@ function RecordLive({ onReady }) {
                 <span className="material-symbols-outlined ms-fill text-on-primary-container" style={{fontSize:48}}>mic</span>
               </button>
               <p className="text-primary-fixed font-semibold mt-4 text-lg">Tap to Record</p>
-              <p className="text-xs text-on-surface-variant mt-2">Read the passage above naturally — aim for 30–60 seconds</p>
+              <p className="text-xs text-on-surface-variant mt-2">Read the passage above naturally — aim for at least 60 seconds</p>
             </>
           )}
         </div>
@@ -245,7 +245,7 @@ function RecordLive({ onReady }) {
           <div className="inline-flex items-center gap-3 bg-surface-container-high border border-outline-variant/30 px-8 py-3 rounded-full">
             <span className="w-3 h-3 bg-error rounded-full animate-pulse" />
             <span className="font-mono text-2xl font-bold text-on-surface tabular-nums">{fmt(timer)}</span>
-            {timer >= 30 && <span className="text-xs font-bold text-secondary-fixed bg-secondary-container/30 px-2 py-0.5 rounded-full">✓ enough</span>}
+            {timer >= 60 && <span className="text-xs font-bold text-secondary-fixed bg-secondary-container/30 px-2 py-0.5 rounded-full">✓ enough</span>}
           </div>
           {/* Waveform bars */}
           <div className="flex items-center justify-center gap-1.5 h-16">
@@ -285,7 +285,7 @@ function RecordLive({ onReady }) {
                 {durationSec.toFixed(0)}s — good length!
               </> : <>
                 <span className="w-5 h-5 bg-primary-container rounded-full flex items-center justify-center text-xs text-on-primary-container">!</span>
-                {durationSec.toFixed(0)}s — need {Math.ceil(30 - durationSec)}s more
+                {durationSec.toFixed(0)}s — need {Math.ceil(60 - durationSec)}s more
               </>}
             </div>
             {hasEnough ? (<>
@@ -354,7 +354,7 @@ function UploadFiles({ onReady }) {
 
   const knownSec      = files.reduce((s, f) => s + (f.durationMs || 0) / 1000, 0)
   const allUnknown    = files.length > 0 && files.every(f => f.durationMs === null)
-  const hasEnough     = knownSec >= 30 || allUnknown
+  const hasEnough     = knownSec >= 60 || allUnknown
   const hasSilent     = files.some(f => f.isSilent)
 
   const fakeTakes = files.map(f => ({
@@ -405,12 +405,12 @@ function UploadFiles({ onReady }) {
 
           {allUnknown ? (
             <p className="text-sm font-medium text-primary-fixed">
-              ⚠️ Couldn't detect audio length — please make sure your recording is at least 30 seconds.
+              ⚠️ Couldn't detect audio length — please make sure your recording is at least 60 seconds.
             </p>
           ) : (
             <p className={`text-sm font-medium ${hasEnough ? 'text-secondary-fixed' : 'text-primary-fixed'}`}>
               Total: {knownSec.toFixed(0)}s
-              {hasEnough ? ' ✓ Ready!' : ` — need ${Math.ceil(30 - knownSec)}s more`}
+              {hasEnough ? ' ✓ Ready!' : ` — need ${Math.ceil(60 - knownSec)}s more`}
             </p>
           )}
 
@@ -442,10 +442,6 @@ export default function RecordPhase({ sessionId, onBack, onRecordingsReady }) {
             <span className="material-symbols-outlined">arrow_back_ios_new</span>
           </button>
           <h1 className="text-lg font-bold text-primary-container">Kidly</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="material-symbols-outlined text-on-surface-variant">lock</span>
-          <span className="material-symbols-outlined text-on-surface-variant">settings</span>
         </div>
       </header>
 
@@ -479,8 +475,8 @@ export default function RecordPhase({ sessionId, onBack, onRecordingsReady }) {
           </button>
         </div>
 
-        {mode === 'record' && <RecordLive onReady={onRecordingsReady} />}
-        {mode === 'upload' && <UploadFiles onReady={onRecordingsReady} />}
+        <div className={mode === 'record' ? '' : 'hidden'}><RecordLive onReady={onRecordingsReady} /></div>
+        <div className={mode === 'upload' ? '' : 'hidden'}><UploadFiles onReady={onRecordingsReady} /></div>
       </main>
     </div>
   )

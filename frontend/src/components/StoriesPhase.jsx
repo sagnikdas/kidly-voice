@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import StoryCard from './StoryCard'
 import StoryReader from './StoryReader'
-import CustomTextModal from './CustomTextModal'
 import { STORIES } from '../data/stories'
 
 const CATEGORIES = ['All', '🌙 Bedtime', '⚔️ Adventure', '🐾 Animals', '✨ Heartfelt']
@@ -27,12 +26,11 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
   const [selectedKey, setSelectedKey] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [readerState, setReaderState] = useState(null)   // { title, text, audioUrl, alignment }
-  const [showCustomModal, setShowCustomModal] = useState(false)
 
   // Feedback state
   const [feedbackEmail, setFeedbackEmail] = useState(email || '')
   const [feedbackMsg, setFeedbackMsg] = useState('')
-  const [submitted, setSubmitted] = useState(false)
+  const [submitted, setSubmitted] = useState(() => !!localStorage.getItem('kidly_feedback_submitted'))
   const [submitting, setSubmitting] = useState(false)
 
   // Toast
@@ -74,6 +72,29 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
       .catch(() => {})
   }, [voiceId, sessionToken])
 
+  // Poll preload-status while background generation is running, updating ⚡ badges live.
+  useEffect(() => {
+    if (!voiceId || !sessionToken) return
+    let cancelled = false
+    let timer
+    const check = async () => {
+      if (cancelled) return
+      try {
+        const r = await fetch(`/api/stories/preload-status?voice_id=${encodeURIComponent(voiceId)}`)
+        if (!r.ok || cancelled) return
+        const status = await r.json()
+        const r2 = await fetch(`/api/stories/cached?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
+        if (r2.ok && !cancelled) {
+          const data = await r2.json()
+          if (data?.cached) setCachedKeys(new Set(data.cached))
+        }
+        if (!status.done && !cancelled) timer = setTimeout(check, 15000)
+      } catch {}
+    }
+    timer = setTimeout(check, 8000)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [voiceId, sessionToken])
+
   useEffect(() => {
     if (!voiceJustCreated) return
     const t = setTimeout(() => { setShowToast(false); onToastDismissed?.() }, 5000)
@@ -89,7 +110,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
 
     // Serve from in-session cache — no network call needed.
     if (audioCache[cacheKey]) {
-      setReaderState({ title: story.title, ...audioCache[cacheKey] })
+      setReaderState({ title: story.title, emoji: story.emoji, ...audioCache[cacheKey] })
       return
     }
 
@@ -110,17 +131,12 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
       setAudioCache(prev => ({ ...prev, [cacheKey]: entry }))
       setPlayedKeys(prev => new Set([...prev, story.key]))
       setCachedKeys(prev => new Set([...prev, story.key]))
-      setReaderState({ title: story.title, ...entry })
+      setReaderState({ title: story.title, emoji: story.emoji, ...entry })
     } catch (e) {
       setLoadError(e.message)
     } finally {
       setLoadingKey(null)
     }
-  }
-
-  const openCustomReader = ({ title, text, audioUrl, alignment }) => {
-    setShowCustomModal(false)
-    setReaderState({ title, text, audioUrl, alignment })
   }
 
   const handleSubmit = async () => {
@@ -133,6 +149,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
         body: JSON.stringify({ email: feedbackEmail, message: feedbackMsg }),
       })
       if (feedbackEmail) setEmail(feedbackEmail)
+      localStorage.setItem('kidly_feedback_submitted', '1')
       setSubmitted(true)
     } catch {
       setSubmitted(true)
@@ -149,21 +166,12 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
       {readerState && (
         <StoryReader
           title={readerState.title}
+          emoji={readerState.emoji}
           text={readerState.text}
           audioUrl={readerState.audioUrl}
           alignment={readerState.alignment}
           onClose={() => setReaderState(null)}
           onOpenSettings={onOpenSettings}
-        />
-      )}
-
-      {/* Custom text modal */}
-      {showCustomModal && (
-        <CustomTextModal
-          voiceId={voiceId}
-          sessionToken={sessionToken}
-          onClose={() => setShowCustomModal(false)}
-          onOpenReader={openCustomReader}
         />
       )}
 
@@ -244,6 +252,16 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
             </div>
           </div>
 
+          {/* Story generation progress — shown while preload is still running */}
+          {!isDemo && cachedKeys.size < STORIES.length && (
+            <div className="mb-4 flex items-center gap-2.5 bg-surface-container-high border border-outline-variant/20 rounded-xl px-4 py-2.5">
+              <span className="w-3 h-3 border-2 border-on-surface-variant/30 border-t-on-surface-variant rounded-full animate-spin shrink-0" />
+              <span className="text-xs text-on-surface-variant">
+                Generating your stories — <strong className="text-on-surface">{cachedKeys.size} of {STORIES.length}</strong> ready
+              </span>
+            </div>
+          )}
+
           {/* Stories grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
             {filteredStories.map(story => (
@@ -290,8 +308,12 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
                  style={{bottom:'calc(24px + var(--sab))', background:'var(--color-primary-container, #ffd600)', boxShadow:'0 4px 20px rgba(255,214,0,0.4)'}}>
               <span className="w-4 h-4 border-2 border-on-primary-container/50 border-t-on-primary-container rounded-full animate-spin shrink-0" />
               <div className="text-left">
-                <p className="text-sm font-bold leading-tight">Generating in your voice…</p>
-                <p className="text-xs opacity-70 leading-tight mt-0.5">{s?.emoji} {s?.title} · 30–60 sec</p>
+                <p className="text-sm font-bold leading-tight">
+                  {cachedKeys.has(s?.key) ? 'Loading story…' : 'Generating in your voice…'}
+                </p>
+                <p className="text-xs opacity-70 leading-tight mt-0.5">
+                  {s?.emoji} {s?.title}{!cachedKeys.has(s?.key) && ' · 30–60 sec'}
+                </p>
               </div>
             </div>
           )
@@ -311,6 +333,13 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
               >
                 <span className="material-symbols-outlined ms-fill text-base">play_arrow</span>
                 {cachedKeys.has(sel?.key) ? '⚡ Play' : 'Go'}
+              </button>
+              <button
+                onClick={() => setSelectedKey(null)}
+                className="flex items-center justify-center w-7 h-7 rounded-full bg-black/20 hover:bg-black/30 transition-colors shrink-0"
+                aria-label="Dismiss"
+              >
+                <span className="material-symbols-outlined text-on-primary-container" style={{fontSize:16}}>close</span>
               </button>
             </div>
           )

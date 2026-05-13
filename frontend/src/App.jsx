@@ -111,9 +111,6 @@ export default function App() {
     setVoiceJustCreated(false)
     setRecordings([])
     setPhase('record')
-    if (oldVoiceId && !wasDemo) {
-      fetch(`/api/admin/voices/${oldVoiceId}`, { method: 'DELETE' }).catch(() => {})
-    }
   }
 
   const onLogout = () => {
@@ -210,6 +207,7 @@ export default function App() {
         fontSize={fontSize}
         setFontSize={setFontSize}
         userDisplay={userDisplay}
+        onReRecord={phase === 'stories' ? onReRecord : undefined}
       />
       {phase === 'landing' && (
         <Landing

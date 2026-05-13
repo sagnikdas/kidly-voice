@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export default function SettingsDrawer({ isOpen, onClose, theme, setTheme, fontSize, setFontSize, userDisplay }) {
+export default function SettingsDrawer({ isOpen, onClose, theme, setTheme, fontSize, setFontSize, userDisplay, onReRecord }) {
   const [feedbackEmail, setFeedbackEmail] = useState(userDisplay?.includes('@') ? userDisplay : '')
   const [feedbackMsg, setFeedbackMsg] = useState('')
   const [submitted, setSubmitted] = useState(false)
@@ -78,6 +78,22 @@ export default function SettingsDrawer({ isOpen, onClose, theme, setTheme, fontS
           </div>
           <p className="text-xs text-on-surface-variant mt-2 text-center">Changes apply across all pages</p>
         </div>
+
+        {/* Voice */}
+        {onReRecord && (
+          <div className="mb-7">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-base">🎙</span>
+              <span className="text-sm font-semibold text-on-surface">Your Voice</span>
+            </div>
+            <button
+              onClick={() => { onClose(); onReRecord() }}
+              className="w-full py-3 rounded-xl text-sm font-bold transition-all border-2 bg-surface-container-high text-on-surface-variant border-transparent hover:border-outline-variant"
+            >
+              Re-record my voice
+            </button>
+          </div>
+        )}
 
         {/* Help & Feedback */}
         <div>

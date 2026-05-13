@@ -47,7 +47,7 @@ function fmt(s) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 }
 
-export default function StoryReader({ title, text, audioUrl, alignment, onClose, onOpenSettings }) {
+export default function StoryReader({ title, emoji, text, audioUrl, alignment, onClose, onOpenSettings }) {
   const [highlightOn, setHighlightOn] = useState(true)
   const [currentWordIdx, setCurrentWordIdx] = useState(-1)
   const [playing, setPlaying] = useState(false)
@@ -107,6 +107,30 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
     return () => window.removeEventListener('popstate', onPop)
   }, [onClose])
 
+  const togglePlay = () =>
+    audioRef.current?.paused ? audioRef.current.play() : audioRef.current?.pause()
+
+  const seekToClient = useCallback((clientX) => {
+    if (!duration || !audioRef.current || !progressBarRef.current) return
+    const rect = progressBarRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    audioRef.current.currentTime = ratio * duration
+  }, [duration])
+
+  // Non-passive touch listeners so e.preventDefault() actually suppresses scroll while seeking.
+  // Must be declared after seekToClient to avoid a TDZ reference in the dependency array.
+  useEffect(() => {
+    const bar = progressBarRef.current
+    if (!bar) return
+    const seek = (e) => { e.preventDefault(); seekToClient(e.touches[0].clientX) }
+    bar.addEventListener('touchstart', seek, { passive: false })
+    bar.addEventListener('touchmove', seek, { passive: false })
+    return () => {
+      bar.removeEventListener('touchstart', seek)
+      bar.removeEventListener('touchmove', seek)
+    }
+  }, [seekToClient])
+
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') { window.history.back(); return }
@@ -118,16 +142,6 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  const togglePlay = () =>
-    audioRef.current?.paused ? audioRef.current.play() : audioRef.current?.pause()
-
-  const seekToClient = useCallback((clientX) => {
-    if (!duration || !audioRef.current || !progressBarRef.current) return
-    const rect = progressBarRef.current.getBoundingClientRect()
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-    audioRef.current.currentTime = ratio * duration
-  }, [duration])
 
   // Render text with per-word spans
   const paragraphs = text.split(/\n\n+/)
@@ -193,7 +207,7 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
         {/* Story emoji illustration */}
         <div className="w-full max-w-[700px] mx-auto px-5 mb-6">
           <div className="relative aspect-[4/2] rounded-xl overflow-hidden bg-gradient-to-br from-surface-container to-surface-container-highest flex items-center justify-center border-4 border-surface-container-highest">
-            <span className="text-[80px]">📖</span>
+            <span className="text-[80px]">{emoji || '📖'}</span>
             <div className="absolute inset-0" style={{background: 'radial-gradient(circle at center, transparent 0%, rgba(22,19,9,0.4) 100%)'}} />
           </div>
         </div>
@@ -219,7 +233,7 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
             ref={progressBarRef}
             className="relative flex items-center w-full h-8 cursor-pointer"
             onMouseDown={e => seekToClient(e.clientX)}
-            onTouchStart={e => seekToClient(e.touches[0].clientX)}
+            onMouseMove={e => e.buttons === 1 && seekToClient(e.clientX)}
           >
             <div className="pointer-events-none absolute w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
               <div className="h-full bg-secondary rounded-full" style={{width:`${progress}%`, boxShadow:'0 0 10px rgba(127,214,195,0.5)', transition:'width 0.1s linear'}} />
@@ -242,7 +256,7 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
           </button>
           <button onClick={() => { if(audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 30) }}
             className="flex items-center justify-center min-w-[44px] min-h-[44px] text-on-surface-variant active:text-primary-fixed transition-colors">
-            <span className="material-symbols-outlined" style={{fontSize:30}}>skip_previous</span>
+            <span className="material-symbols-outlined" style={{fontSize:30}}>fast_rewind</span>
           </button>
           <button onClick={togglePlay} className="w-16 h-16 bg-primary-container rounded-full flex items-center justify-center transition-all active:translate-y-1 glow-primary" style={{boxShadow:'0 4px 0 0 #e9c400'}}>
             <span className="material-symbols-outlined ms-fill text-on-primary-container" style={{fontSize:40}}>
@@ -251,7 +265,7 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
           </button>
           <button onClick={() => { if(audioRef.current) audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 30) }}
             className="flex items-center justify-center min-w-[44px] min-h-[44px] text-on-surface-variant active:text-primary-fixed transition-colors">
-            <span className="material-symbols-outlined" style={{fontSize:30}}>skip_next</span>
+            <span className="material-symbols-outlined" style={{fontSize:30}}>fast_forward</span>
           </button>
           <button onClick={() => { if(audioRef.current) audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 10) }}
             className="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px] text-on-surface-variant active:text-primary-fixed transition-colors">

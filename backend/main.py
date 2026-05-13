@@ -610,6 +610,18 @@ async def _preload_stories_bg(voice_id: str) -> None:
     await asyncio.gather(*[_one(k) for k in STORIES])
     state["done"] = True
 
+    # All stories cached — free the Fish Audio voice slot so new users can onboard.
+    if state["failed"] == 0 and FA_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                await client.delete(
+                    f"https://api.fish.audio/model/{voice_id}",
+                    headers={"Authorization": f"Bearer {FA_KEY}"},
+                )
+            log.warning("[VOICE DELETED] voice_id=%s all stories cached", voice_id)
+        except Exception as exc:
+            log.warning("[VOICE DELETE FAILED] voice_id=%s err=%s", voice_id, exc)
+
 
 class CloneRequest(BaseModel):
     session_id: str

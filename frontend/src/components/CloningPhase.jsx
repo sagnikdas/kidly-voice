@@ -95,6 +95,14 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
         setEmailSaved(true)
       }
 
+      // Kick off background pre-generation of all 15 stories so the voice slot
+      // can be freed on Fish Audio once they're all cached on disk.
+      fetch('/api/stories/preload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice_id, session_token }),
+      }).catch(() => {})
+
       setVoiceId(voice_id)
       setSessionToken(session_token)
       setStepIdx(2)
