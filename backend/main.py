@@ -910,6 +910,19 @@ async def preload_status(voice_id: str):
     return {"total": total, "ready": state["ready"], "failed": state["failed"], "done": state["done"]}
 
 
+@app.get("/api/stories/cached")
+async def get_cached_stories(voice_id: str, session_token: str):
+    """Return which story keys have a server-cached MP3 for this voice."""
+    _validate_session(voice_id, session_token)
+    cached = [
+        key for key in STORIES
+        if (TTS_DIR / (
+            hashlib.sha256(f"ts:{voice_id}:{key}:fa:mp3:{FA_TTS_BITRATE}".encode()).hexdigest()[:20] + ".mp3"
+        )).exists()
+    ]
+    return {"cached": cached}
+
+
 @app.post("/api/voice/speak-custom")
 @limiter.limit(RL_SPEAK_CUSTOM)
 async def speak_custom(request: Request, req: CustomSpeakRequest):

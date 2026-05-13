@@ -14,7 +14,14 @@ const CATEGORY_MORALS = {
 
 
 export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, userDisplay, onReRecord, onLogout, onOpenSettings, voiceJustCreated, onToastDismissed }) {
-  const [playedKeys, setPlayedKeys] = useState(new Set())
+  const [playedKeys, setPlayedKeys] = useState(() => {
+    try { const s = localStorage.getItem(`kidly_played_${voiceId}`); return new Set(s ? JSON.parse(s) : []) }
+    catch { return new Set() }
+  })
+  const [cachedKeys, setCachedKeys] = useState(() => {
+    try { const s = localStorage.getItem(`kidly_cached_${voiceId}`); return new Set(s ? JSON.parse(s) : []) }
+    catch { return new Set() }
+  })
   const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, alignment, text }
   const [loadingKey, setLoadingKey] = useState(null)
   const [selectedKey, setSelectedKey] = useState(null)
@@ -35,14 +42,37 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
   const [activeCategory, setActiveCategory] = useState('All')
   const filteredStories = activeCategory === 'All' ? STORIES : STORIES.filter(s => CATEGORY_MORALS[activeCategory]?.includes(s.moral))
 
-  // Reset per-voice state when the voice changes (e.g. after re-recording)
+  // When voiceId changes, reload persisted state for the new voice
   useEffect(() => {
-    setPlayedKeys(new Set())
+    try { const s = localStorage.getItem(`kidly_played_${voiceId}`); setPlayedKeys(new Set(s ? JSON.parse(s) : [])) }
+    catch { setPlayedKeys(new Set()) }
+    try { const s = localStorage.getItem(`kidly_cached_${voiceId}`); setCachedKeys(new Set(s ? JSON.parse(s) : [])) }
+    catch { setCachedKeys(new Set()) }
     setAudioCache({})
     setReaderState(null)
     setLoadError('')
     setSelectedKey(null)
   }, [voiceId])
+
+  // Persist played + cached keys to localStorage whenever they change
+  useEffect(() => {
+    if (!voiceId) return
+    localStorage.setItem(`kidly_played_${voiceId}`, JSON.stringify([...playedKeys]))
+  }, [playedKeys, voiceId])
+
+  useEffect(() => {
+    if (!voiceId) return
+    localStorage.setItem(`kidly_cached_${voiceId}`, JSON.stringify([...cachedKeys]))
+  }, [cachedKeys, voiceId])
+
+  // On mount, fetch ground-truth cached list from server
+  useEffect(() => {
+    if (!voiceId || !sessionToken) return
+    fetch(`/api/stories/cached?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.cached) setCachedKeys(new Set(data.cached)) })
+      .catch(() => {})
+  }, [voiceId, sessionToken])
 
   useEffect(() => {
     if (!voiceJustCreated) return
@@ -79,6 +109,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
       const entry = { audioUrl: audio_url, alignment, text: story_text }
       setAudioCache(prev => ({ ...prev, [cacheKey]: entry }))
       setPlayedKeys(prev => new Set([...prev, story.key]))
+      setCachedKeys(prev => new Set([...prev, story.key]))
       setReaderState({ title: story.title, ...entry })
     } catch (e) {
       setLoadError(e.message)
@@ -221,6 +252,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
                 story={story}
                 hasPlayed={playedKeys.has(story.key)}
                 loading={loadingKey === story.key}
+                isCached={cachedKeys.has(story.key)}
                 onPlayClick={s => setSelectedKey(s.key)}
                 isSelected={selectedKey === story.key}
               />
@@ -250,8 +282,23 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
           )}
         </main>
 
-        {/* Go bar — appears when a story is selected */}
-        {selectedKey && (() => {
+        {/* Generating banner — shown while TTS is being created */}
+        {loadingKey && (() => {
+          const s = STORIES.find(s => s.key === loadingKey)
+          return (
+            <div className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-5 py-3 rounded-2xl shadow-xl text-on-primary-container"
+                 style={{bottom:'calc(24px + var(--sab))', background:'var(--color-primary-container, #ffd600)', boxShadow:'0 4px 20px rgba(255,214,0,0.4)'}}>
+              <span className="w-4 h-4 border-2 border-on-primary-container/50 border-t-on-primary-container rounded-full animate-spin shrink-0" />
+              <div className="text-left">
+                <p className="text-sm font-bold leading-tight">Generating in your voice…</p>
+                <p className="text-xs opacity-70 leading-tight mt-0.5">{s?.emoji} {s?.title} · 30–60 sec</p>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Go bar — appears when a story is selected and not loading */}
+        {selectedKey && !loadingKey && (() => {
           const sel = STORIES.find(s => s.key === selectedKey)
           return (
             <div className="fixed left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl text-on-primary-container"
@@ -260,17 +307,10 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
               <span className="text-sm font-bold max-w-[160px] truncate">{sel?.title}</span>
               <button
                 onClick={() => sel && handlePlayClick(sel)}
-                disabled={!!loadingKey}
-                className="ml-1 flex items-center gap-1.5 bg-black/20 hover:bg-black/30 disabled:opacity-50 px-4 py-1.5 rounded-full text-sm font-bold transition-colors"
+                className="ml-1 flex items-center gap-1.5 bg-black/20 hover:bg-black/30 px-4 py-1.5 rounded-full text-sm font-bold transition-colors"
               >
-                {loadingKey ? (
-                  <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined ms-fill text-base">play_arrow</span>
-                    Go
-                  </>
-                )}
+                <span className="material-symbols-outlined ms-fill text-base">play_arrow</span>
+                {cachedKeys.has(sel?.key) ? '⚡ Play' : 'Go'}
               </button>
             </div>
           )

@@ -15,7 +15,7 @@ const MORAL_BG = {
   comfort:        'from-sky-950 to-cyan-900',
 }
 
-export default function StoryCard({ story, hasPlayed, loading, onPlayClick, isSelected }) {
+export default function StoryCard({ story, hasPlayed, loading, isCached, onPlayClick, isSelected }) {
   const bg = MORAL_BG[story.moral] || 'from-surface-container to-surface-container-high'
 
   return (
@@ -31,7 +31,13 @@ export default function StoryCard({ story, hasPlayed, loading, onPlayClick, isSe
       }}
     >
       {/* Emoji tile */}
-      <div className={`h-24 bg-gradient-to-br ${bg} flex items-end justify-end p-3`}>
+      <div className={`h-24 bg-gradient-to-br ${bg} flex items-end justify-end p-3 relative`}>
+        {isCached && !loading && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded-full">
+            <span className="text-[10px] leading-none">⚡</span>
+            <span className="text-[9px] font-bold text-white/90 uppercase tracking-wide">Ready</span>
+          </div>
+        )}
         <span className="text-[52px] leading-none select-none drop-shadow-lg">{story.emoji}</span>
       </div>
 

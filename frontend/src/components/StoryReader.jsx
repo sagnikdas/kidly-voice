@@ -99,9 +99,17 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
     return () => { audioRef.current?.pause() }
   }, [audioUrl])
 
+  // Android hardware back + iOS swipe-back → close the reader
+  useEffect(() => {
+    window.history.pushState({ kidlyReader: true }, '')
+    const onPop = () => onClose()
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [onClose])
+
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === 'Escape') { window.history.back(); return }
       if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
         e.preventDefault()
         audioRef.current?.paused ? audioRef.current.play() : audioRef.current?.pause()
@@ -109,7 +117,7 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [])
 
   const togglePlay = () =>
     audioRef.current?.paused ? audioRef.current.play() : audioRef.current?.pause()
@@ -159,10 +167,10 @@ export default function StoryReader({ title, text, audioUrl, alignment, onClose,
       {/* Header */}
       <header className="fixed top-0 w-full z-10 flex justify-between items-center px-5 bg-surface border-b border-outline-variant/20 h-header safe-top">
         <div className="flex items-center gap-1">
-          <button onClick={onClose} className="flex items-center justify-center min-w-[44px] min-h-[44px] active:opacity-75 transition-opacity">
+          <button onClick={() => window.history.back()} className="flex items-center justify-center min-w-[44px] min-h-[44px] active:opacity-75 transition-opacity">
             <span className="material-symbols-outlined text-on-surface-variant">arrow_back_ios_new</span>
           </button>
-          <button onClick={onClose} className="text-2xl font-extrabold text-primary-container tracking-tight active:opacity-75 transition-opacity">
+          <button onClick={() => window.history.back()} className="text-2xl font-extrabold text-primary-container tracking-tight active:opacity-75 transition-opacity">
             Kidly
           </button>
         </div>
