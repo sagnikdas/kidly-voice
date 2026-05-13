@@ -1,0 +1,23 @@
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches: [main]          # auto-deploy on every push to main
+  workflow_dispatch:          # also allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    concurrency: deploy       # prevent two deploys running at the same time
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

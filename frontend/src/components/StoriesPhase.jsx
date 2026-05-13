@@ -65,7 +65,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     localStorage.setItem(`kidly_cached_${voiceId}`, JSON.stringify([...cachedKeys]))
   }, [cachedKeys, voiceId])
 
-  // On mount, fetch ground-truth cached list from server
+  // On mount, fetch ground-truth cached list from server (catches stories cached on another device)
   useEffect(() => {
     if (!voiceId || !sessionToken) return
     fetch(`/api/stories/cached?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
