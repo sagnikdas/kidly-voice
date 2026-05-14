@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import httpx
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -778,6 +778,9 @@ class UserSettingsRequest(BaseModel):
     session_token: str
     theme: Optional[str] = None
     font_size: Optional[str] = None
+    streak_count: Optional[int] = None
+    streak_last_date: Optional[str] = None   # YYYY-MM-DD
+    played_keys: Optional[List[str]] = None
 
 
 class FeedbackRequest(BaseModel):
@@ -1105,6 +1108,14 @@ async def save_user_settings(request: Request, req: UserSettingsRequest):
         s["theme"] = req.theme
     if req.font_size is not None:
         s["font_size"] = req.font_size
+    if req.streak_count is not None:
+        s["streak_count"] = req.streak_count
+    if req.streak_last_date is not None:
+        s["streak_last_date"] = req.streak_last_date
+    if req.played_keys is not None:
+        # Merge: union with any previously stored keys so progress is never lost
+        existing = set(s.get("played_keys") or [])
+        s["played_keys"] = list(existing | set(req.played_keys))
     _save_users(users)
     return {"ok": True}
 

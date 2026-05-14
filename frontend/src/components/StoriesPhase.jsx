@@ -11,8 +11,13 @@ const CATEGORY_MORALS = {
   '✨ Heartfelt': ['creativity', 'self-worth', 'generosity'],
 }
 
+<<<<<<< Updated upstream
 
 export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, userDisplay, onReRecord, onLogout, onOpenSettings, voiceJustCreated, onToastDismissed }) {
+=======
+export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, userDisplay, onReRecord, onLogout, onOpenSettings, voiceJustCreated, onToastDismissed, initialProgress }) {
+  const os = useOS()
+>>>>>>> Stashed changes
   const [playedKeys, setPlayedKeys] = useState(() => {
     try { const s = localStorage.getItem(`kidly_played_${voiceId}`); return new Set(s ? JSON.parse(s) : []) }
     catch { return new Set() }
@@ -105,7 +110,50 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     return () => clearTimeout(t)
   }, [voiceJustCreated, onToastDismissed])
 
+  // Merge server-side progress (streak + played keys) with local state.
+  // Server wins when its date is newer or streak is longer; played keys are unioned.
+  useEffect(() => {
+    if (!initialProgress) return
+    const { streak_count, streak_last_date, played_keys } = initialProgress
+
+    if (streak_count !== null && streak_last_date) {
+      const localDate  = localStorage.getItem('kidly_streak_last_date') || ''
+      const localCount = parseInt(localStorage.getItem('kidly_streak_count') || '0', 10)
+      const serverWins = streak_last_date > localDate ||
+        (streak_last_date === localDate && streak_count > localCount)
+      if (serverWins) {
+        localStorage.setItem('kidly_streak_count', String(streak_count))
+        localStorage.setItem('kidly_streak_last_date', streak_last_date)
+        setStreak(streak_count)
+      }
+    }
+
+    if (played_keys?.length) {
+      setPlayedKeys(prev => {
+        const merged = new Set([...prev, ...played_keys])
+        localStorage.setItem(`kidly_played_${voiceId}`, JSON.stringify([...merged]))
+        return merged
+      })
+    }
+  }, [initialProgress]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const dismissToast = () => { setShowToast(false); onToastDismissed?.() }
+
+  // Persist streak + played progress to server (fire-and-forget, skipped in demo mode)
+  const saveProgressToServer = (newStreak, newPlayedKeys) => {
+    if (isDemo || !sessionToken) return
+    const date = localStorage.getItem('kidly_streak_last_date') || ''
+    fetch('/api/user/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_token: sessionToken,
+        streak_count: newStreak,
+        streak_last_date: date,
+        played_keys: [...newPlayedKeys],
+      }),
+    }).catch(() => {})
+  }
 
   const handlePlayClick = async (story) => {
     if (!voiceId) { setLoadError('No voice found — please re-record.'); return }
@@ -115,6 +163,13 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     // Serve from in-session cache — no network call needed.
     if (audioCache[cacheKey]) {
       setReaderState({ title: story.title, emoji: story.emoji, ...audioCache[cacheKey] })
+<<<<<<< Updated upstream
+=======
+      const newStreak = updateStreak()
+      setStreak(newStreak)
+      // played_keys unchanged for cache hit, but streak may have updated
+      setPlayedKeys(prev => { saveProgressToServer(newStreak, prev); return prev })
+>>>>>>> Stashed changes
       return
     }
 
@@ -133,7 +188,13 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
       const { audio_url, story_text } = await r.json()
       const entry = { audioUrl: audio_url, text: story_text }
       setAudioCache(prev => ({ ...prev, [cacheKey]: entry }))
-      setPlayedKeys(prev => new Set([...prev, story.key]))
+      const newStreak = updateStreak()
+      setStreak(newStreak)
+      setPlayedKeys(prev => {
+        const next = new Set([...prev, story.key])
+        saveProgressToServer(newStreak, next)
+        return next
+      })
       setCachedKeys(prev => new Set([...prev, story.key]))
       setReaderState({ title: story.title, emoji: story.emoji, ...entry })
     } catch (e) {

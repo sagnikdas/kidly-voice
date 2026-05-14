@@ -23,6 +23,12 @@ export default function App() {
     if (!s) return
     if (s.theme) { setThemeState(s.theme); localStorage.setItem('kidly_theme', s.theme) }
     if (s.font_size) { setFontSizeState(s.font_size); localStorage.setItem('kidly_font_size', s.font_size) }
+    // Pass streak + played progress to StoriesPhase for cross-device merge
+    setInitialProgress({
+      streak_count:     s.streak_count     ?? null,
+      streak_last_date: s.streak_last_date ?? null,
+      played_keys:      s.played_keys      ?? null,
+    })
   }, [])
 
   const settingsSaveTimer = useRef(null)
@@ -65,6 +71,7 @@ export default function App() {
   const [isDemo, setIsDemo] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [voiceJustCreated, setVoiceJustCreated] = useState(false)
+  const [initialProgress, setInitialProgress] = useState(null)
   const [sessionId] = useState(() => {
     let id = localStorage.getItem('kidly_session')
     if (!id) {
@@ -242,6 +249,7 @@ export default function App() {
         />
       )}
       {phase === 'stories' && (
+<<<<<<< Updated upstream
         <StoriesPhase
           voiceId={voiceId}
           sessionToken={sessionToken}
@@ -255,6 +263,24 @@ export default function App() {
           voiceJustCreated={voiceJustCreated}
           onToastDismissed={() => setVoiceJustCreated(false)}
         />
+=======
+        <div key="ph-stories" style={{animation: 'fadeUp 0.35s ease-out both'}}>
+          <StoriesPhase
+            voiceId={voiceId}
+            sessionToken={sessionToken}
+            isDemo={isDemo}
+            email={email}
+            setEmail={setEmail}
+            userDisplay={userDisplay}
+            onReRecord={onReRecord}
+            onLogout={onLogout}
+            onOpenSettings={() => setShowSettings(true)}
+            voiceJustCreated={voiceJustCreated}
+            onToastDismissed={() => setVoiceJustCreated(false)}
+            initialProgress={initialProgress}
+          />
+        </div>
+>>>>>>> Stashed changes
       )}
     </div>
   )
