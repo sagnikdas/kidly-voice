@@ -4,8 +4,10 @@ import RecordPhase from './components/RecordPhase'
 import CloningPhase from './components/CloningPhase'
 import StoriesPhase from './components/StoriesPhase'
 import SettingsDrawer from './components/SettingsDrawer'
+import { OSContext, detectOS } from './utils/os'
 
 export default function App() {
+  const [os] = useState(detectOS)
   const [phase, setPhase] = useState('landing')
   const [email, setEmail] = useState('')
   const [mobile, setMobile] = useState('')
@@ -52,6 +54,10 @@ export default function App() {
       }).catch(() => {})
     }, 1500)
   }
+
+  useEffect(() => {
+    document.documentElement.dataset.os = os
+  }, [os])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -198,6 +204,7 @@ export default function App() {
   }
 
   return (
+    <OSContext.Provider value={os}>
     <div className="min-h-screen">
       <SettingsDrawer
         isOpen={showSettings}
@@ -210,52 +217,61 @@ export default function App() {
         onReRecord={phase === 'stories' ? onReRecord : undefined}
       />
       {phase === 'landing' && (
-        <Landing
-          email={email}
-          setEmail={setEmail}
-          mobile={mobile}
-          setMobile={setMobile}
-          restoring={restoring}
-          onStart={onStart}
-          canGoToStories={!!(voiceId && sessionToken)}
-          onGoToStories={() => setPhase('stories')}
-        />
+        <div key="ph-landing" style={{animation: 'fadeUp 0.35s ease-out both'}}>
+          <Landing
+            email={email}
+            setEmail={setEmail}
+            mobile={mobile}
+            setMobile={setMobile}
+            restoring={restoring}
+            onStart={onStart}
+            canGoToStories={!!(voiceId && sessionToken)}
+            onGoToStories={() => setPhase('stories')}
+          />
+        </div>
       )}
       {phase === 'record' && (
-        <RecordPhase
-          sessionId={sessionId}
-          onBack={() => setPhase('landing')}
-          onRecordingsReady={(recs) => {
-            setRecordings(recs)
-            setPhase('cloning')
-          }}
-        />
+        <div key="ph-record" style={{animation: 'fadeUp 0.35s ease-out both'}}>
+          <RecordPhase
+            sessionId={sessionId}
+            onBack={() => setPhase('landing')}
+            onRecordingsReady={(recs) => {
+              setRecordings(recs)
+              setPhase('cloning')
+            }}
+          />
+        </div>
       )}
       {phase === 'cloning' && (
-        <CloningPhase
-          sessionId={sessionId}
-          recordings={recordings}
-          email={email}
-          mobile={mobile}
-          onVoiceReady={onVoiceReady}
-          onBack={() => setPhase('record')}
-        />
+        <div key="ph-cloning" style={{animation: 'fadeUp 0.35s ease-out both'}}>
+          <CloningPhase
+            sessionId={sessionId}
+            recordings={recordings}
+            email={email}
+            mobile={mobile}
+            onVoiceReady={onVoiceReady}
+            onBack={() => setPhase('record')}
+          />
+        </div>
       )}
       {phase === 'stories' && (
-        <StoriesPhase
-          voiceId={voiceId}
-          sessionToken={sessionToken}
-          isDemo={isDemo}
-          email={email}
-          setEmail={setEmail}
-          userDisplay={userDisplay}
-          onReRecord={onReRecord}
-          onLogout={onLogout}
-          onOpenSettings={() => setShowSettings(true)}
-          voiceJustCreated={voiceJustCreated}
-          onToastDismissed={() => setVoiceJustCreated(false)}
-        />
+        <div key="ph-stories" style={{animation: 'fadeUp 0.35s ease-out both'}}>
+          <StoriesPhase
+            voiceId={voiceId}
+            sessionToken={sessionToken}
+            isDemo={isDemo}
+            email={email}
+            setEmail={setEmail}
+            userDisplay={userDisplay}
+            onReRecord={onReRecord}
+            onLogout={onLogout}
+            onOpenSettings={() => setShowSettings(true)}
+            voiceJustCreated={voiceJustCreated}
+            onToastDismissed={() => setVoiceJustCreated(false)}
+          />
+        </div>
       )}
     </div>
+    </OSContext.Provider>
   )
 }
