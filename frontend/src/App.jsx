@@ -5,6 +5,7 @@ import RecordPhase from './components/RecordPhase'
 import CloningPhase from './components/CloningPhase'
 import StoriesPhase from './components/StoriesPhase'
 import SettingsDrawer from './components/SettingsDrawer'
+import InstallPrompt from './components/InstallPrompt'
 import { OSContext, detectOS } from './utils/os'
 
 export default function App() {
@@ -22,6 +23,10 @@ export default function App() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const [verifyError, setVerifyError] = useState('')
+
+  // PWA install prompt
+  const deferredPromptRef = useRef(null)
+  const [showInstall, setShowInstall] = useState(false)
 
   const sessionTokenRef = useRef(sessionToken)
   useEffect(() => { sessionTokenRef.current = sessionToken }, [sessionToken])
@@ -64,6 +69,13 @@ export default function App() {
       }).catch(() => {})
     }, 1500)
   }
+
+  // Capture beforeinstallprompt early — Chrome fires it once, must be caught here
+  useEffect(() => {
+    const handler = (e) => { e.preventDefault(); deferredPromptRef.current = e }
+    window.addEventListener('beforeinstallprompt', handler)
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [])
 
   useEffect(() => { document.documentElement.dataset.os = os }, [os])
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
@@ -268,6 +280,22 @@ export default function App() {
         />
       )}
 
+      {phase === 'stories' && <StoriesInstallTrigger
+        os={os}
+        deferredPromptRef={deferredPromptRef}
+        onShow={() => setShowInstall(true)}
+      />}
+
+      {showInstall && (
+        <InstallPrompt
+          deferredPrompt={deferredPromptRef.current}
+          onDismiss={() => {
+            setShowInstall(false)
+            localStorage.setItem('kidly_install_dismissed', '1')
+          }}
+        />
+      )}
+
       {phase === 'stories' && (
         <div key="ph-stories" style={{animation: 'fadeUp 0.35s ease-out both'}}>
           <StoriesPhase
@@ -286,4 +314,21 @@ export default function App() {
     </div>
     </OSContext.Provider>
   )
+}
+
+// Shows the install prompt once, 5 seconds after reaching Stories, if not already installed/dismissed.
+function StoriesInstallTrigger({ os, deferredPromptRef, onShow }) {
+  useEffect(() => {
+    const alreadyDismissed = localStorage.getItem('kidly_install_dismissed')
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true
+    if (alreadyDismissed || isStandalone) return
+
+    // iOS: always show (no beforeinstallprompt event on Safari)
+    // Android/Desktop: only show if Chrome captured the event
+    const t = setTimeout(() => {
+      if (os === 'ios' || deferredPromptRef.current) onShow()
+    }, 5000)
+    return () => clearTimeout(t)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 }
