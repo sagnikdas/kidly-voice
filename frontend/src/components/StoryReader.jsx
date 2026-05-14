@@ -1,23 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 
-function buildWordTimings(alignment) {
-  if (!alignment?.characters) return []
-  const { characters, character_start_times_seconds: starts, character_end_times_seconds: ends } = alignment
-  const words = []
-  let wStart = null, wEnd = null
-  for (let i = 0; i < characters.length; i++) {
-    const ch = characters[i]
-    if (!ch || /\s/.test(ch)) {
-      if (wStart !== null) { words.push({ start: wStart, end: wEnd }); wStart = null }
-    } else {
-      if (wStart === null) wStart = starts[i]
-      wEnd = ends[i]
-    }
-  }
-  if (wStart !== null) words.push({ start: wStart, end: wEnd })
-  return words
-}
-
 function buildEvenTimings(text, duration) {
   if (!duration || !text) return []
   const wordCount = text.split(/\n\n+/).reduce((n, para) => {
@@ -47,7 +29,7 @@ function fmt(s) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 }
 
-export default function StoryReader({ title, emoji, text, audioUrl, alignment, onClose, onOpenSettings }) {
+export default function StoryReader({ title, emoji, text, audioUrl, onClose, onOpenSettings }) {
   const [highlightOn, setHighlightOn] = useState(true)
   const [currentWordIdx, setCurrentWordIdx] = useState(-1)
   const [playing, setPlaying] = useState(false)
@@ -57,10 +39,7 @@ export default function StoryReader({ title, emoji, text, audioUrl, alignment, o
   const audioRef = useRef(null)
   const progressBarRef = useRef(null)
   const wordRefs = useRef([])
-  const wordTimings = useMemo(() => {
-    if (alignment?.characters) return buildWordTimings(alignment)
-    return buildEvenTimings(text, duration)
-  }, [alignment, text, duration])
+  const wordTimings = useMemo(() => buildEvenTimings(text, duration), [text, duration])
 
   const handleTimeUpdate = useCallback(() => {
     const t = audioRef.current?.currentTime ?? 0

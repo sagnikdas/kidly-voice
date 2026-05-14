@@ -22,11 +22,11 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     catch { return new Set() }
   })
   const [cachedChecked, setCachedChecked] = useState(false) // true after first server fetch; gates the progress banner
-  const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, alignment, text }
+  const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, text }
   const [loadingKey, setLoadingKey] = useState(null)
   const [selectedKey, setSelectedKey] = useState(null)
   const [loadError, setLoadError] = useState('')
-  const [readerState, setReaderState] = useState(null)   // { title, text, audioUrl, alignment }
+  const [readerState, setReaderState] = useState(null)   // { title, text, audioUrl }
 
   // Feedback state
   const [feedbackEmail, setFeedbackEmail] = useState(email || '')
@@ -130,8 +130,8 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || 'Failed to load story')
       }
-      const { audio_url, alignment, story_text } = await r.json()
-      const entry = { audioUrl: audio_url, alignment, text: story_text }
+      const { audio_url, story_text } = await r.json()
+      const entry = { audioUrl: audio_url, text: story_text }
       setAudioCache(prev => ({ ...prev, [cacheKey]: entry }))
       setPlayedKeys(prev => new Set([...prev, story.key]))
       setCachedKeys(prev => new Set([...prev, story.key]))
@@ -173,7 +173,6 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
           emoji={readerState.emoji}
           text={readerState.text}
           audioUrl={readerState.audioUrl}
-          alignment={readerState.alignment}
           onClose={() => setReaderState(null)}
           onOpenSettings={onOpenSettings}
         />
