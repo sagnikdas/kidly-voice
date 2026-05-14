@@ -84,7 +84,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
     const check = async () => {
       if (cancelled) return
       try {
-        const r = await fetch(`/api/stories/preload-status?voice_id=${encodeURIComponent(voiceId)}`)
+        const r = await fetch(`/api/stories/preload-status?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
         if (!r.ok || cancelled) return
         const status = await r.json()
         const r2 = await fetch(`/api/stories/cached?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)

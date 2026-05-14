@@ -16,7 +16,13 @@ origins = ["http://localhost:5173", "http://localhost:8000", "http://localhost:3
 
 [uploads]
 # Maximum size per recording chunk in megabytes. Rejects oversized uploads early.
-max_recording_mb = 50
+# 20 MB comfortably fits 60s of WAV at 48 kHz / 16-bit / stereo (~11 MB).
+max_recording_mb = 20
+
+# Maximum total bytes ever stored under a single session_id before the upload
+# endpoint starts returning 413. Bounds disk usage if someone spams uploads
+# without ever calling /api/voice/clone.
+max_session_mb = 40
 
 [rate_limits]
 # Applied to every route that has no specific override below.
