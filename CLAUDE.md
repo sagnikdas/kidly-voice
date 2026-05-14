@@ -20,6 +20,16 @@ FISH_AUDIO_API_KEY=<your key>
 
 The Vite dev server proxies `/api/*` to `http://localhost:8000`. In production, FastAPI serves the compiled React dist directly.
 
+```bash
+# Build the React frontend (outputs to frontend/dist/):
+cd frontend && npm run build
+
+# Run backend only (after building frontend, mimics production):
+cd backend && uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+There are **no automated tests** in this repo.
+
 ## Architecture
 
 ```
@@ -31,7 +41,15 @@ Browser (React SPA, Vite/Tailwind)
                 └─ tmp/users.json   (session registry — no database)
 ```
 
-There is no database. State lives in flat files under `tmp/` (mounted as a 3 GB Fly.io persistent volume at `/app/tmp`). `users.json` maps `session_token → {voice_id, email, …}`.
+There is no database. State lives in flat files under `tmp/` (mounted as a 3 GB Fly.io persistent volume at `/app/tmp`). `users.json` has three top-level keys:
+
+```json
+{
+  "sessions":     { "<session_token>": { "voice_id": "…", "email": "…", "mobile": "…", "settings": {} } },
+  "email_index":  { "<email>": "<session_token>" },
+  "mobile_index": { "<mobile>": "<session_token>" }
+}
+```
 
 ### User flow
 
@@ -51,6 +69,10 @@ All MP3s are named `SHA256("ts:{voice_id}:{story_key}:fa:mp3:{bitrate}")[:20].mp
 
 `_preload_state` is in-memory (lost on restart). `GET /api/stories/preload-status` falls back to counting MP3s on disk when no in-memory state exists, so returning users always get an accurate `done: true` response.
 
+### Fish Audio concurrency
+
+All outbound Fish Audio calls go through `_fa_request()`, which acquires a global asyncio semaphore (`_fa_sem`, default 8 slots, overridable via `FISH_AUDIO_CONCURRENCY` env var). The preload path adds a second per-voice semaphore (4 slots) on top of this. Any new endpoint that calls Fish Audio **must** use `_fa_request()` — never call `httpx` directly.
+
 ### Stories
 
 All 15 story texts are hardcoded in `backend/main.py` (`STORIES` dict) and mirrored as metadata in `frontend/src/data/stories.js` (`STORIES` array with `key`, `emoji`, `title`, `moral`, `ageRange`). Adding a story requires editing both files with the same `key`.
@@ -61,13 +83,18 @@ All 15 story texts are hardcoded in `backend/main.py` (`STORIES` dict) and mirro
 
 ## Configuration
 
-`backend/config.toml` controls rate limits, demo voice ID, max upload size, and CORS origins — no code change needed for these. In production, override with environment variables (`CORS_ORIGINS`, `FISH_AUDIO_API_KEY`, `ADMIN_SECRET`).
+`backend/config.toml` controls rate limits, max upload size, and CORS origins — no code change needed for these. In production, override with environment variables (`CORS_ORIGINS`, `FISH_AUDIO_API_KEY`, `ADMIN_SECRET`, `FISH_AUDIO_MP3_BITRATE`, `FISH_AUDIO_CONCURRENCY`, `RESEND_API_KEY`, `APP_BASE_URL`).
 
 ## Deployment
 
 Push to `main` → GitHub Actions runs `flyctl deploy --remote-only` (requires `FLY_API_TOKEN` secret in GitHub repo settings). The Dockerfile does a two-stage build: Node builds React, then Python serves the dist.
 
+`deploy.sh` is a first-deploy helper — it creates the Fly app, provisions the volume, sets secrets, and deploys in one shot. Use `fly deploy` for subsequent deploys.
+
 ```bash
+# First-time deploy (creates app + volume):
+FISH_AUDIO_API_KEY=<key> ./deploy.sh
+
 # Manual deploy
 fly deploy
 

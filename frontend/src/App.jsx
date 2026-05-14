@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Landing from './components/Landing'
+import WelcomeInterstitial from './components/WelcomeInterstitial'
 import RecordPhase from './components/RecordPhase'
 import CloningPhase from './components/CloningPhase'
 import StoriesPhase from './components/StoriesPhase'
@@ -10,13 +11,17 @@ export default function App() {
   const [os] = useState(detectOS)
   const [phase, setPhase] = useState('landing')
   const [email, setEmail] = useState('')
-  const [mobile, setMobile] = useState('')
   const [voiceId, setVoiceId] = useState(() => localStorage.getItem('kidly_voice_id') || '')
   const [sessionToken, setSessionToken] = useState(() => localStorage.getItem('kidly_session_token') || '')
   const [userDisplay, setUserDisplay] = useState(() => localStorage.getItem('kidly_user_display') || '')
   const [theme, setThemeState] = useState(() => localStorage.getItem('kidly_theme') || 'dark')
   const [fontSize, setFontSizeState] = useState(() => localStorage.getItem('kidly_font_size') || 'md')
   const [showSettings, setShowSettings] = useState(false)
+
+  // Magic-link flow state
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState('')
+  const [verifyError, setVerifyError] = useState('')
 
   const sessionTokenRef = useRef(sessionToken)
   useEffect(() => { sessionTokenRef.current = sessionToken }, [sessionToken])
@@ -25,7 +30,6 @@ export default function App() {
     if (!s) return
     if (s.theme) { setThemeState(s.theme); localStorage.setItem('kidly_theme', s.theme) }
     if (s.font_size) { setFontSizeState(s.font_size); localStorage.setItem('kidly_font_size', s.font_size) }
-    // Pass streak + played progress to StoriesPhase for cross-device merge
     setInitialProgress({
       streak_count:     s.streak_count     ?? null,
       streak_last_date: s.streak_last_date ?? null,
@@ -61,66 +65,125 @@ export default function App() {
     }, 1500)
   }
 
-  useEffect(() => {
-    document.documentElement.dataset.os = os
-  }, [os])
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-  }, [theme])
-
+  useEffect(() => { document.documentElement.dataset.os = os }, [os])
+  useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   useEffect(() => {
     const sizes = { sm: '14px', md: '16px', lg: '19px' }
     document.documentElement.style.fontSize = sizes[fontSize] || '16px'
   }, [fontSize])
 
-  const [isDemo, setIsDemo] = useState(false)
-  const [restoring, setRestoring] = useState(false)
   const [voiceJustCreated, setVoiceJustCreated] = useState(false)
   const [initialProgress, setInitialProgress] = useState(null)
   const [sessionId] = useState(() => {
     let id = localStorage.getItem('kidly_session')
-    if (!id) {
-      id = crypto.randomUUID()
-      localStorage.setItem('kidly_session', id)
-    }
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem('kidly_session', id) }
     return id
   })
   const [recordings, setRecordings] = useState([])
 
+  const verifyToken = useCallback(async (token) => {
+    setPhase('verifying')
+    setVerifyError('')
+    try {
+      const r = await fetch(`/api/auth/verify?token=${encodeURIComponent(token)}`)
+      const data = await r.json()
+      if (!r.ok) {
+        setVerifyError(data.detail || 'Link is invalid or expired. Please request a new one.')
+        setPhase('landing')
+        return
+      }
+      const { session_token, voice_id, email: verifiedEmail, is_new_user, settings } = data
+      localStorage.setItem('kidly_session_token', session_token)
+      setSessionToken(session_token)
+      if (verifiedEmail) {
+        setEmail(verifiedEmail)
+        localStorage.setItem('kidly_user_display', verifiedEmail)
+        setUserDisplay(verifiedEmail)
+      }
+      if (voice_id) {
+        localStorage.setItem('kidly_voice_id', voice_id)
+        setVoiceId(voice_id)
+      }
+      applySettings(settings)
+      if (is_new_user) {
+        setPhase('welcome')
+      } else {
+        setPhase('stories')
+        fetch(`/api/user/settings?session_token=${encodeURIComponent(session_token)}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(applySettings)
+          .catch(() => {})
+      }
+    } catch {
+      setVerifyError('Something went wrong. Please request a new link.')
+      setPhase('landing')
+    }
+  }, [applySettings])
+
+  // On mount: handle ?token= magic link, or restore existing session
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('token')
+    if (token) {
+      history.replaceState({}, '', window.location.pathname)
+      verifyToken(token)
+      return
+    }
     if (voiceId && sessionToken) {
       setPhase('stories')
-      // Restore server-side settings (may differ from localStorage on a new device)
       fetch(`/api/user/settings?session_token=${encodeURIComponent(sessionToken)}`)
         .then(r => r.ok ? r.json() : null)
         .then(applySettings)
         .catch(() => {})
-    } else if (voiceId && !sessionToken) {
+      return
+    }
+    // Session exists but no voice yet (setup was interrupted)
+    if (!voiceId && sessionToken) {
+      setPhase('welcome')
+      return
+    }
+    // Clear stale voice_id with no session
+    if (voiceId) {
       localStorage.removeItem('kidly_voice_id')
       setVoiceId('')
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onSendLink = async (emailAddr) => {
+    setSending(true)
+    setSendError('')
+    try {
+      const r = await fetch('/api/auth/send-magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailAddr }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        setSendError(j.detail || 'Could not send link. Please try again.')
+        return false
+      }
+      return true
+    } catch {
+      setSendError('Network error — please try again.')
+      return false
+    } finally {
+      setSending(false)
+    }
+  }
 
   const onVoiceReady = (id, token) => {
     localStorage.setItem('kidly_voice_id', id)
     localStorage.setItem('kidly_session_token', token)
-    const display = email.trim() || mobile.trim()
-    if (display) { localStorage.setItem('kidly_user_display', display); setUserDisplay(display) }
     setVoiceId(id)
     setSessionToken(token)
     setVoiceJustCreated(true)
     setPhase('stories')
   }
 
-  const onReRecord = async () => {
-    const oldVoiceId = voiceId
-    const wasDemo = isDemo
+  const onReRecord = () => {
     localStorage.removeItem('kidly_voice_id')
-    localStorage.removeItem('kidly_session_token')
     setVoiceId('')
-    setSessionToken('')
-    setIsDemo(false)
     setVoiceJustCreated(false)
     setRecordings([])
     setPhase('record')
@@ -133,81 +196,10 @@ export default function App() {
     setVoiceId('')
     setSessionToken('')
     setEmail('')
-    setMobile('')
     setUserDisplay('')
-    setIsDemo(false)
     setVoiceJustCreated(false)
     setRecordings([])
     setPhase('landing')
-  }
-
-  const onStart = async () => {
-    if (email.trim()) {
-      setRestoring(true)
-      try {
-        const r = await fetch(`/api/user/lookup?email=${encodeURIComponent(email.trim())}`)
-        if (r.ok) {
-          const { voice_id, session_token, settings } = await r.json()
-          if (voice_id && session_token) {
-            localStorage.setItem('kidly_voice_id', voice_id)
-            localStorage.setItem('kidly_session_token', session_token)
-            localStorage.setItem('kidly_user_display', email.trim())
-            setVoiceId(voice_id)
-            setSessionToken(session_token)
-            setUserDisplay(email.trim())
-            applySettings(settings)
-            setIsDemo(false)
-            setPhase('stories')
-            return
-          }
-        }
-      } catch {}
-      finally { setRestoring(false) }
-      setPhase('record')
-      return
-    }
-
-    if (mobile.trim()) {
-      setRestoring(true)
-      try {
-        const r = await fetch(`/api/user/lookup?mobile=${encodeURIComponent(mobile.trim())}`)
-        if (r.ok) {
-          const { voice_id, session_token, settings } = await r.json()
-          if (voice_id && session_token) {
-            localStorage.setItem('kidly_voice_id', voice_id)
-            localStorage.setItem('kidly_session_token', session_token)
-            localStorage.setItem('kidly_user_display', mobile.trim())
-            setVoiceId(voice_id)
-            setSessionToken(session_token)
-            setUserDisplay(mobile.trim())
-            applySettings(settings)
-            setIsDemo(false)
-            setPhase('stories')
-            return
-          }
-        }
-      } catch {}
-      finally { setRestoring(false) }
-      setPhase('record')
-      return
-    }
-
-    // No identifier — try the demo voice.
-    try {
-      const r = await fetch('/api/voice/default')
-      if (r.ok) {
-        const { voice_id, session_token } = await r.json()
-        if (voice_id && session_token) {
-          setVoiceId(voice_id)
-          setSessionToken(session_token)
-          setIsDemo(true)
-          setPhase('stories')
-          return
-        }
-      }
-    } catch {}
-
-    setPhase('record')
   }
 
   return (
@@ -223,46 +215,64 @@ export default function App() {
         userDisplay={userDisplay}
         onReRecord={phase === 'stories' ? onReRecord : undefined}
       />
+
       {phase === 'landing' && (
         <Landing
           email={email}
           setEmail={setEmail}
-          mobile={mobile}
-          setMobile={setMobile}
-          restoring={restoring}
-          onStart={onStart}
-          canGoToStories={!!(voiceId && sessionToken)}
-          onGoToStories={() => setPhase('stories')}
+          onSendLink={onSendLink}
+          sending={sending}
+          sendError={sendError}
+          verifyError={verifyError}
         />
       )}
+
+      {phase === 'verifying' && (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <div className="text-6xl">🌙</div>
+            <div className="flex items-center gap-2 text-on-surface font-semibold">
+              <span className="w-4 h-4 border-2 border-primary-container border-t-transparent rounded-full animate-spin" />
+              Signing you in…
+            </div>
+          </div>
+        </div>
+      )}
+
+      {phase === 'welcome' && (
+        <WelcomeInterstitial
+          email={email}
+          onGetStarted={() => setPhase('record')}
+        />
+      )}
+
       {phase === 'record' && (
         <RecordPhase
           sessionId={sessionId}
-          onBack={() => setPhase('landing')}
+          onBack={() => setPhase(sessionToken && !voiceId ? 'welcome' : 'landing')}
           onRecordingsReady={(recs) => {
             setRecordings(recs)
             setPhase('cloning')
           }}
         />
       )}
+
       {phase === 'cloning' && (
         <CloningPhase
           sessionId={sessionId}
           recordings={recordings}
           email={email}
-          mobile={mobile}
+          sessionToken={sessionToken}
           onVoiceReady={onVoiceReady}
           onBack={() => setPhase('record')}
         />
       )}
+
       {phase === 'stories' && (
         <div key="ph-stories" style={{animation: 'fadeUp 0.35s ease-out both'}}>
           <StoriesPhase
             voiceId={voiceId}
             sessionToken={sessionToken}
-            isDemo={isDemo}
-            email={email}
-            setEmail={setEmail}
             userDisplay={userDisplay}
             onReRecord={onReRecord}
             onLogout={onLogout}

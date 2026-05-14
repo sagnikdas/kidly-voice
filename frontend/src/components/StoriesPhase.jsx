@@ -25,7 +25,7 @@ function updateStreak() {
   return next
 }
 
-export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, setEmail, userDisplay, onReRecord, onLogout, onOpenSettings, voiceJustCreated, onToastDismissed, initialProgress }) {
+export default function StoriesPhase({ voiceId, sessionToken, userDisplay, onReRecord, onLogout, onOpenSettings, voiceJustCreated, onToastDismissed, initialProgress }) {
   const os = useOS()
   const [playedKeys, setPlayedKeys] = useState(() => {
     try { const s = localStorage.getItem(`kidly_played_${voiceId}`); return new Set(s ? JSON.parse(s) : []) }
@@ -144,9 +144,9 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
 
   const dismissToast = () => { setShowToast(false); onToastDismissed?.() }
 
-  // Persist streak + played progress to server (fire-and-forget, skipped in demo mode)
+  // Persist streak + played progress to server (fire-and-forget)
   const saveProgressToServer = (newStreak, newPlayedKeys) => {
-    if (isDemo || !sessionToken) return
+    if (!sessionToken) return
     const date = localStorage.getItem('kidly_streak_last_date') || ''
     fetch('/api/user/settings', {
       method: 'POST',
@@ -220,21 +220,6 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
         />
       )}
 
-      {/* Demo mode banner */}
-      {isDemo && (
-        <div className="fixed top-0 inset-x-0 z-50 bg-secondary-container text-on-secondary-container px-4 py-3 flex items-center justify-between gap-4 text-sm">
-          <span>
-            <strong>Demo voice active</strong> — you're hearing a sample voice, not your own.
-          </span>
-          <button
-            onClick={onReRecord}
-            className="shrink-0 bg-primary-container text-on-primary-container font-semibold px-4 py-1.5 rounded-full text-xs hover:opacity-90 transition-opacity"
-          >
-            Record my voice →
-          </button>
-        </div>
-      )}
-
       {/* Voice-ready toast */}
       {showToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-secondary-container text-on-secondary-container px-5 py-3 rounded-2xl shadow-lg text-sm font-semibold">
@@ -243,9 +228,9 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
         </div>
       )}
 
-      <div className={`min-h-screen bg-background text-on-surface ${isDemo ? 'pt-16' : ''}`} style={{paddingBottom:'calc(100px + var(--sab))'}}>
+      <div className="min-h-screen bg-background text-on-surface" style={{paddingBottom:'calc(100px + var(--sab))'}}>
         {/* Top bar — iOS: centered title; Android/web: left-aligned */}
-        <header className="fixed top-0 w-full z-50 flex items-center justify-between px-6 bg-surface border-b border-outline-variant/20 h-header safe-top relative" style={{top: isDemo ? 48 : 0}}>
+        <header className="fixed top-0 w-full z-50 flex items-center justify-between px-6 bg-surface border-b border-outline-variant/20 h-header safe-top relative">
           {os === 'ios' ? (
             <>
               {/* iOS: settings icon on left, centered brand, user/logout on right */}
@@ -341,7 +326,7 @@ export default function StoriesPhase({ voiceId, sessionToken, isDemo, email, set
           </div>
 
           {/* Story generation progress */}
-          {!isDemo && cachedChecked && cachedKeys.size < STORIES.length && (
+          {cachedChecked && cachedKeys.size < STORIES.length && (
             <div className="mb-4 flex items-center gap-2.5 bg-surface-container-high border border-outline-variant/20 rounded-xl px-4 py-2.5">
               <span className="w-3 h-3 border-2 border-on-surface-variant/30 border-t-on-surface-variant rounded-full animate-spin shrink-0" />
               <span className="text-xs text-on-surface-variant">

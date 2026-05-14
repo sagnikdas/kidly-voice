@@ -44,22 +44,28 @@ try:
 except FileNotFoundError:
     _cfg = {}
 
-# Default / demo voice — from config.toml [voices].default_voice_id.
-# Users with no credentials are served stories with this voice (demo mode).
-# Empty string disables demo mode; users are sent straight to the record flow.
-DEFAULT_VOICE_ID: str = _cfg.get("voices", {}).get("default_voice_id", "")
-# Well-known token that is ONLY valid for the default voice — never stored in users.json.
-DEFAULT_SESSION_TOKEN: str = "kidly-demo-voice-v1"
+RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+
+# Auto-detect base URL for magic links. On Fly.io, FLY_APP_NAME is always set.
+_fly_app = os.getenv("FLY_APP_NAME", "")
+APP_BASE_URL: str = os.getenv(
+    "APP_BASE_URL",
+    f"https://{_fly_app}.fly.dev" if _fly_app else "http://localhost:5173",
+)
+
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+
+MAGIC_LINK_TTL_SECONDS = 900  # 15 minutes
 
 _rl = _cfg.get("rate_limits", {})
-RL_GLOBAL           = _rl.get("global_default",           "60/minute")
-RL_RECORDING        = _rl.get("recording_upload",         "30/minute")
-RL_VOICE_CLONE      = _rl.get("voice_clone",              "5/hour")
-RL_VOICE_PREVIEW    = _rl.get("voice_preview",            "10/hour")
-RL_STORY_SPEAK_TS   = _rl.get("story_speak_timestamped",  "30/hour")
-RL_USER_SAVE        = _rl.get("user_save",                "10/hour")
-RL_USER_LOOKUP      = _rl.get("user_lookup",              "20/hour")
-RL_FEEDBACK         = _rl.get("feedback",                 "5/hour")
+RL_GLOBAL             = _rl.get("global_default",           "60/minute")
+RL_RECORDING          = _rl.get("recording_upload",         "30/minute")
+RL_VOICE_CLONE        = _rl.get("voice_clone",              "5/hour")
+RL_VOICE_PREVIEW      = _rl.get("voice_preview",            "10/hour")
+RL_STORY_SPEAK_TS     = _rl.get("story_speak_timestamped",  "30/hour")
+RL_MAGIC_LINK_SEND    = _rl.get("magic_link_send",          "3/hour")
+RL_MAGIC_LINK_VERIFY  = _rl.get("magic_link_verify",        "10/hour")
+RL_FEEDBACK           = _rl.get("feedback",                 "5/hour")
 
 # CORS origins — set CORS_ORIGINS env var in production (comma-separated).
 # Falls back to config.toml [cors].origins for local dev.
@@ -155,16 +161,17 @@ for d in [REC_DIR, TTS_DIR]:
 
 
 def _load_users() -> dict:
-    """Returns {"sessions": {token: entry}, "email_index": {email: token}, "mobile_index": {mobile: token}}."""
+    """Returns {"sessions": {...}, "email_index": {...}, "pending_tokens": {...}}."""
     if USERS_FILE.exists():
         try:
             data = json.loads(USERS_FILE.read_text())
             if "sessions" in data:
-                data.setdefault("mobile_index", {})
+                data.setdefault("email_index", {})
+                data.setdefault("pending_tokens", {})
                 return data
         except Exception:
             pass
-    return {"sessions": {}, "email_index": {}, "mobile_index": {}}
+    return {"sessions": {}, "email_index": {}, "pending_tokens": {}}
 
 
 def _save_users(users: dict):
@@ -173,9 +180,6 @@ def _save_users(users: dict):
 
 def _validate_session(voice_id: str, session_token: str):
     """Raises 403 if session_token does not own voice_id."""
-    # Demo voice has a well-known constant token — no file lookup needed.
-    if DEFAULT_VOICE_ID and voice_id == DEFAULT_VOICE_ID and session_token == DEFAULT_SESSION_TOKEN:
-        return
     users = _load_users()
     entry = users["sessions"].get(session_token)
     if not entry or entry.get("voice_id") != voice_id:
@@ -262,6 +266,48 @@ async def _fa_request(
     # but keeps the type checker happy.
     assert last_exc is not None
     raise last_exc
+
+
+async def _send_magic_email(to_email: str, link: str) -> None:
+    """Send magic-link email via Resend API using httpx (no extra SDK needed)."""
+    if not RESEND_API_KEY:
+        log.warning("[MAGIC LINK] RESEND_API_KEY not set — email skipped. Link: %s", link)
+        return
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0f0a1e;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;margin:40px auto;background:#1a1230;border-radius:16px;overflow:hidden">
+    <tr><td style="padding:40px 32px;text-align:center">
+      <div style="font-size:48px;margin-bottom:12px">&#127769;</div>
+      <h1 style="color:#c4b5fd;font-size:24px;margin:0 0 6px;font-weight:700">Kidly</h1>
+      <p style="color:#8b5cf6;font-size:13px;margin:0 0 28px">Your bedtime story companion</p>
+      <p style="color:#e0d4f7;font-size:15px;margin:0 0 8px;line-height:1.6">Click the button below to sign in.</p>
+      <p style="color:#a78bfa;font-size:12px;margin:0 0 28px">This link expires in 15 minutes and can only be used once.</p>
+      <a href="{link}" style="display:inline-block;background:#7c3aed;color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:50px;font-weight:700;font-size:16px">Sign in to Kidly &rarr;</a>
+      <p style="color:#4b5563;font-size:12px;margin:28px 0 0;line-height:1.5">
+        If you didn&rsquo;t request this, you can safely ignore this email.
+      </p>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "from": "Kidly <onboarding@resend.dev>",
+                "to": [to_email],
+                "reply_to": ["kidlyvoice@gmail.com"],
+                "subject": "Your Kidly sign-in link",
+                "html": html,
+            },
+        )
+    if r.status_code >= 400:
+        log.warning("[MAGIC LINK EMAIL FAILED] status=%d body=%s", r.status_code, r.text[:300])
+        raise HTTPException(500, "Failed to send email — please try again.")
+    log.warning("[MAGIC LINK SENT] to=%s", to_email)
 
 
 async def _purge_stale_recordings_loop() -> None:
@@ -763,15 +809,14 @@ async def _preload_stories_bg(voice_id: str) -> None:
             log.warning("[VOICE DELETE FAILED] voice_id=%s err=%s", voice_id, exc)
 
 
+class MagicLinkRequest(BaseModel):
+    email: str
+
+
 class CloneRequest(BaseModel):
     session_id: str
-    label: str = "My Kidly Voice"
-
-
-class SaveUserRequest(BaseModel):
     session_token: str
-    email: Optional[str] = None
-    mobile: Optional[str] = None
+    label: str = "My Kidly Voice"
 
 
 class UserSettingsRequest(BaseModel):
@@ -811,6 +856,88 @@ PREVIEW_TEXT = (
 )
 
 
+@app.post("/api/auth/send-magic-link")
+@limiter.limit(RL_MAGIC_LINK_SEND)
+async def send_magic_link(request: Request, req: MagicLinkRequest):
+    email = req.email.lower().strip()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(400, "Invalid email address.")
+
+    token = str(uuid.uuid4())
+    expires_at = time.time() + MAGIC_LINK_TTL_SECONDS
+
+    users = _load_users()
+    # Purge expired pending tokens on each send to keep users.json tidy
+    now = time.time()
+    users["pending_tokens"] = {
+        k: v for k, v in users["pending_tokens"].items()
+        if v.get("expires_at", 0) > now
+    }
+    users["pending_tokens"][token] = {"email": email, "expires_at": expires_at}
+    _save_users(users)
+
+    link = f"{APP_BASE_URL}/?token={token}"
+    await _send_magic_email(email, link)
+    return {"ok": True}
+
+
+@app.get("/api/auth/verify")
+@limiter.limit(RL_MAGIC_LINK_VERIFY)
+async def verify_magic_link(request: Request, token: str):
+    if not token:
+        raise HTTPException(400, "Token is required.")
+
+    users = _load_users()
+    pending = users.get("pending_tokens", {})
+    entry = pending.get(token)
+
+    if not entry:
+        raise HTTPException(400, "Link is invalid or has already been used.")
+    if time.time() > entry.get("expires_at", 0):
+        del users["pending_tokens"][token]
+        _save_users(users)
+        raise HTTPException(400, "Link has expired — please request a new one.")
+
+    # Single-use: consume the token immediately
+    email = entry["email"]
+    del users["pending_tokens"][token]
+
+    existing_token = users["email_index"].get(email)
+    if existing_token and existing_token in users["sessions"]:
+        # Returning user — restore their existing session
+        _save_users(users)
+        session = users["sessions"][existing_token]
+        log.warning("[VERIFY] returning user email=%s", email)
+        return {
+            "session_token": existing_token,
+            "voice_id": session.get("voice_id"),
+            "email": email,
+            "is_new_user": False,
+            "settings": session.get("settings", {}),
+        }
+
+    # New user — create a bare session (no voice_id yet)
+    session_token = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+    users["sessions"][session_token] = {
+        "voice_id": None,
+        "email": email,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "settings": {},
+    }
+    users["email_index"][email] = session_token
+    _save_users(users)
+    log.warning("[VERIFY] new user email=%s", email)
+    return {
+        "session_token": session_token,
+        "voice_id": None,
+        "email": email,
+        "is_new_user": True,
+        "settings": {},
+    }
+
+
 @app.post("/api/recording")
 @limiter.limit(RL_RECORDING)
 async def upload_recording(
@@ -845,6 +972,14 @@ async def upload_recording(
 async def clone_voice(request: Request, req: CloneRequest):
     if not FA_KEY:
         raise HTTPException(500, "FISH_AUDIO_API_KEY not set — add it to .env")
+
+    # Validate the session created during magic-link verify
+    users = _load_users()
+    session = users["sessions"].get(req.session_token)
+    if not session:
+        raise HTTPException(403, "Invalid session — please sign in again.")
+    if session.get("voice_id"):
+        raise HTTPException(409, "A voice has already been cloned for this session.")
 
     _validate_session_id(req.session_id)
     session_dir = REC_DIR / req.session_id
@@ -893,21 +1028,15 @@ async def clone_voice(request: Request, req: CloneRequest):
     if session_dir.exists():
         shutil.rmtree(session_dir, ignore_errors=True)
 
-    # Bind a session token to this voice_id. The client must present this token
-    # with every future TTS request — prevents any other party from using the voice.
-    session_token = str(uuid.uuid4())
+    # Patch voice_id onto the existing magic-link session (no new token created).
     now = datetime.now(timezone.utc).isoformat()
     users = _load_users()
-    users["sessions"][session_token] = {
-        "voice_id": voice_id,
-        "email": None,
-        "created_at": now,
-        "updated_at": now,
-    }
+    users["sessions"][req.session_token]["voice_id"] = voice_id
+    users["sessions"][req.session_token]["updated_at"] = now
     _save_users(users)
-    log.warning("[NEW VOICE] voice_id=%s", voice_id)
+    log.warning("[NEW VOICE] voice_id=%s email=%s", voice_id, session.get("email", ""))
 
-    return {"voice_id": voice_id, "session_token": session_token}
+    return {"voice_id": voice_id, "session_token": req.session_token}
 
 
 @app.post("/api/voice/preview")
@@ -1050,53 +1179,6 @@ async def get_audio(filename: str):
     return FileResponse(str(path), media_type="audio/mpeg")
 
 
-@app.post("/api/user/save")
-@limiter.limit(RL_USER_SAVE)
-async def save_user(request: Request, req: SaveUserRequest):
-    if not req.email and not req.mobile:
-        raise HTTPException(400, "email or mobile is required")
-    if not req.session_token:
-        raise HTTPException(400, "session_token is required")
-    users = _load_users()
-    if req.session_token not in users["sessions"]:
-        raise HTTPException(404, "Session not found — please re-record your voice.")
-    now = datetime.now(timezone.utc).isoformat()
-    if req.email:
-        email = req.email.lower().strip()
-        users["sessions"][req.session_token]["email"] = email
-        users["email_index"][email] = req.session_token
-        log.warning("[USER SAVE] email=%s", email)
-    if req.mobile:
-        mobile = req.mobile.strip()
-        users["sessions"][req.session_token]["mobile"] = mobile
-        users["mobile_index"][mobile] = req.session_token
-        log.warning("[USER SAVE] mobile=%s", mobile)
-    users["sessions"][req.session_token]["updated_at"] = now
-    _save_users(users)
-    return {"ok": True}
-
-
-@app.get("/api/user/lookup")
-@limiter.limit(RL_USER_LOOKUP)
-async def lookup_user(request: Request, email: Optional[str] = None, mobile: Optional[str] = None):
-    if not email and not mobile:
-        raise HTTPException(400, "email or mobile is required")
-    users = _load_users()
-    token = None
-    if email:
-        token = users["email_index"].get(email.lower().strip())
-    if not token and mobile:
-        token = users["mobile_index"].get(mobile.strip())
-    if not token:
-        return {"voice_id": None, "session_token": None}
-    entry = users["sessions"].get(token, {})
-    return {
-        "voice_id": entry.get("voice_id"),
-        "session_token": token,
-        "settings": entry.get("settings", {}),
-    }
-
-
 @app.post("/api/user/settings")
 @limiter.limit("30/hour")
 async def save_user_settings(request: Request, req: UserSettingsRequest):
@@ -1151,15 +1233,6 @@ async def save_feedback(request: Request, req: FeedbackRequest):
 @app.get("/api/health")
 async def health():
     return {"ok": True}
-
-
-@app.get("/api/voice/default")
-@limiter.limit("30/minute")
-async def get_default_voice(request: Request):
-    """Returns the demo voice credentials. voice_id is null when demo mode is disabled."""
-    if not DEFAULT_VOICE_ID:
-        return {"voice_id": None, "session_token": None}
-    return {"voice_id": DEFAULT_VOICE_ID, "session_token": DEFAULT_SESSION_TOKEN}
 
 
 # ── Voice management (admin) ───────────────────────────────────────────────────

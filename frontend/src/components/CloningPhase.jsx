@@ -6,15 +6,12 @@ const STEPS = [
   { label: 'Your voice is ready!' },
 ]
 
-export default function CloningPhase({ sessionId, recordings, email: initialEmail, mobile: initialMobile, onVoiceReady, onBack }) {
+export default function CloningPhase({ sessionId, recordings, email, sessionToken, onVoiceReady, onBack }) {
   const [stepIdx, setStepIdx] = useState(0)
   const [err, setErr] = useState('')
   const [retryCount, setRetryCount] = useState(0)
   const [voiceId, setVoiceId] = useState('')
-  const [sessionToken, setSessionToken] = useState('')
-  const [recoveryEmail, setRecoveryEmail] = useState(initialEmail || '')
-  const [emailSaved, setEmailSaved] = useState(!!initialEmail)
-  const [emailSaving, setEmailSaving] = useState(false)
+  const [clonedToken, setClonedToken] = useState('')
 
   // Preview state
   const [previewBusy, setPreviewBusy] = useState(false)
@@ -39,7 +36,7 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
     setErr('')
     setStepIdx(0)
     setVoiceId('')
-    setSessionToken('')
+    setClonedToken('')
     setPreviewUrl('')
     setPreviewBusy(false)
     setPreviewErr('')
@@ -67,63 +64,35 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
       if (runGenRef.current !== gen) return
 
       setStepIdx(1)
-      const label = initialEmail ? `${initialEmail.split('@')[0]}'s Kidly Voice` : 'My Kidly Voice'
+      const label = email ? `${email.split('@')[0]}'s Kidly Voice` : 'My Kidly Voice'
       const r = await fetch('/api/voice/clone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, label }),
+        body: JSON.stringify({ session_id: sessionId, session_token: sessionToken, label }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail || 'Voice cloning failed')
       }
-      const { voice_id, session_token } = await r.json()
+      const { voice_id, session_token: returnedToken } = await r.json()
 
       if (runGenRef.current !== gen) return
-
-      // Save email and/or mobile provided on the landing screen.
-      if (initialEmail || initialMobile) {
-        fetch('/api/user/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_token,
-            ...(initialEmail ? { email: initialEmail } : {}),
-            ...(initialMobile ? { mobile: initialMobile } : {}),
-          }),
-        }).catch(() => {})
-        setEmailSaved(true)
-      }
 
       // Kick off background pre-generation of all 15 stories so the voice slot
       // can be freed on Fish Audio once they're all cached on disk.
       fetch('/api/stories/preload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id, session_token }),
+        body: JSON.stringify({ voice_id, session_token: returnedToken }),
       }).catch(() => {})
 
       setVoiceId(voice_id)
-      setSessionToken(session_token)
+      setClonedToken(returnedToken)
       setStepIdx(2)
     } catch (e) {
       if (runGenRef.current !== gen) return
       setErr(e.message)
     }
-  }
-
-  const saveRecoveryEmail = async () => {
-    if (!recoveryEmail.trim() || emailSaving || !sessionToken) return
-    setEmailSaving(true)
-    try {
-      await fetch('/api/user/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: recoveryEmail.trim(), session_token: sessionToken }),
-      })
-      setEmailSaved(true)
-    } catch {}
-    finally { setEmailSaving(false) }
   }
 
   const loadPreview = async () => {
@@ -134,7 +103,7 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
       const r = await fetch('/api/voice/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voice_id: voiceId, session_token: sessionToken }),
+        body: JSON.stringify({ voice_id: voiceId, session_token: clonedToken }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -192,23 +161,11 @@ export default function CloningPhase({ sessionId, recordings, email: initialEmai
             {previewErr && <p className="text-xs text-error">{previewErr}</p>}
           </div>
 
-          {/* Email recovery */}
-          {!emailSaved ? (
-            <div className="bg-surface-container border border-outline-variant/20 rounded-xl p-4 text-left space-y-3">
-              <div>
-                <p className="text-sm font-semibold text-on-surface">Save your voice access</p>
-                <p className="text-xs text-on-surface-variant mt-0.5">Enter your email to recover your voice on any device.</p>
-              </div>
-              <div className="flex gap-2">
-                <input type="email" value={recoveryEmail} onChange={e => setRecoveryEmail(e.target.value)} onKeyDown={e => e.key==='Enter' && saveRecoveryEmail()} placeholder="your@email.com" className="flex-1 px-3 py-2 text-sm border border-outline-variant rounded-xl bg-surface text-on-surface placeholder:text-on-surface-variant outline-none focus:border-primary-container" />
-                <button onClick={saveRecoveryEmail} disabled={emailSaving || !recoveryEmail.trim()} className="px-4 py-2 bg-primary-container text-on-primary-container rounded-full text-sm font-bold transition-colors btn-3d disabled:opacity-40">{emailSaving ? '…' : 'Save'}</button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-secondary-fixed font-medium">✓ Voice saved to {recoveryEmail || initialEmail} — recoverable from any device</p>
+          {email && (
+            <p className="text-xs text-secondary-fixed font-medium">✓ Voice saved to {email} — recoverable from any device</p>
           )}
 
-          <button onClick={() => onVoiceReady(voiceId, sessionToken)} className="w-full py-4 bg-surface-container-high text-on-surface rounded-full font-bold transition-colors hover:bg-surface-container-highest">
+          <button onClick={() => onVoiceReady(voiceId, clonedToken)} className="w-full py-4 bg-surface-container-high text-on-surface rounded-full font-bold transition-colors hover:bg-surface-container-highest">
             Go to Stories →
           </button>
         </div>

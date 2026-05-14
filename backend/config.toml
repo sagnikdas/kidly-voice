@@ -40,9 +40,9 @@ voice_preview           = "10/hour"
 # Story TTS — hits Fish Audio only on the very first play per user+story.
 story_speak_timestamped = "30/hour"
 
-# User lookup and save — prevent email enumeration and spam.
-user_save               = "10/hour"
-user_lookup             = "20/hour"
+# Magic link auth — keep tight to prevent email flooding and token brute-force.
+magic_link_send         = "3/hour"
+magic_link_verify       = "10/hour"
 
 # Feedback form submissions.
 feedback                = "5/hour"

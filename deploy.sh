@@ -24,6 +24,12 @@ if [[ -z "${FISH_AUDIO_API_KEY:-}" ]]; then
   exit 1
 fi
 
+if [[ -z "${RESEND_API_KEY:-}" ]]; then
+  echo "ERROR: RESEND_API_KEY is not set."
+  echo "       Run: export RESEND_API_KEY=<your-key>"
+  exit 1
+fi
+
 cd "$(dirname "$0")"
 
 echo ""
@@ -50,8 +56,8 @@ fi
 
 # ── set secrets ───────────────────────────────────────────────────────────────
 
-echo "→ Setting FISH_AUDIO_API_KEY secret..."
-fly secrets set FISH_AUDIO_API_KEY="$FISH_AUDIO_API_KEY" --app "$APP"
+echo "→ Setting secrets..."
+fly secrets set FISH_AUDIO_API_KEY="$FISH_AUDIO_API_KEY" RESEND_API_KEY="$RESEND_API_KEY" --app "$APP"
 
 # ── build + deploy ────────────────────────────────────────────────────────────
 

@@ -39,6 +39,7 @@ No Java. No PostgreSQL. One container, one volume.
 
 ```bash
 export FISH_AUDIO_API_KEY=<your-fish-audio-key>
+export RESEND_API_KEY=<your-resend-api-key>
 cd /Users/sagnikdas/kidly/kidly-voice
 ./deploy.sh
 ```
@@ -47,7 +48,7 @@ What the script does, step by step:
 
 1. **Creates the Fly.io app** `kidly-voice` (skipped if it already exists)
 2. **Creates a 3 GB persistent volume** in Mumbai region `bom` — stores TTS cache and sessions across deploys (skipped if it already exists)
-3. **Sets `FISH_AUDIO_API_KEY` as an encrypted Fly.io secret** — never stored in code or Git
+3. **Sets `FISH_AUDIO_API_KEY` and `RESEND_API_KEY` as encrypted Fly.io secrets** — never stored in code or Git
 4. **Builds the Docker image** — Node.js stage compiles the React/Vite frontend, Python stage bundles it alongside the FastAPI backend
 5. **Deploys to Fly.io** — pushes the image and starts the machine
 
@@ -127,8 +128,9 @@ fly ssh console --app kidly-voice
 # List secrets (shows names only, never values)
 fly secrets list --app kidly-voice
 
-# Update the Fish Audio API key
+# Update secrets
 fly secrets set FISH_AUDIO_API_KEY=new_key --app kidly-voice
+fly secrets set RESEND_API_KEY=new_key --app kidly-voice
 
 # Restart the app
 fly machine restart --app kidly-voice
@@ -266,6 +268,7 @@ The app creates a fresh `users.json` automatically on the next request.
 | Secret | Where set | Purpose |
 |---|---|---|
 | `FISH_AUDIO_API_KEY` | Fly.io (`fly secrets set`) | Voice cloning + TTS calls |
+| `RESEND_API_KEY` | Fly.io (`fly secrets set`) | Magic-link sign-in emails |
 | `FLY_API_TOKEN` | GitHub repo settings | Allows GitHub Actions to deploy |
 
-Neither secret is ever committed to Git.
+None of these secrets are ever committed to Git.

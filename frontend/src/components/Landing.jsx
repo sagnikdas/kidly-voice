@@ -1,48 +1,25 @@
 import { useState } from 'react'
 
-// Local (no +): exactly 10 digits.  International (with +): country code + 10–13 digits.
-const isValidMobile = (val) => {
-  const stripped = (val || '').replace(/[\s\-\(\)\.]/g, '')
-  if (stripped.startsWith('+')) return /^\+[1-9]\d{9,13}$/.test(stripped)
-  return /^[1-9]\d{9}$/.test(stripped)
-}
+const isValidEmail = (val) =>
+  /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test((val || '').trim())
 
-// RFC-5321-style email: local@domain.tld, tld ≥ 2 chars
-const isValidEmail = (val) => {
-  return /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test((val || '').trim())
-}
+export default function Landing({ email, setEmail, onSendLink, sending, sendError, verifyError }) {
+  const [touched, setTouched] = useState(false)
+  const [sent, setSent] = useState(false)
 
-export default function Landing({ email, setEmail, mobile, setMobile, onStart, onGoToStories, canGoToStories, restoring }) {
-  const [mobileTouched, setMobileTouched] = useState(false)
-  const [emailTouched,  setEmailTouched]  = useState(false)
-
-  const mobileVal  = mobile || ''
-  const mobileOk   = isValidMobile(mobileVal)
-  const emailOk    = isValidEmail(email)
-  const canProceed = mobileOk || emailOk
-
-  // Show error only when field has content AND has been blurred AND is still invalid
-  const showMobileError = mobileTouched && mobileVal.trim().length > 0 && !mobileOk
-  const showEmailError  = emailTouched  && email.trim().length   > 0 && !emailOk
-
-  const mobileBorder = mobileOk
+  const emailOk = isValidEmail(email)
+  const showError = touched && email.trim().length > 0 && !emailOk
+  const borderClass = emailOk
     ? 'border-green-500'
-    : showMobileError
+    : showError
       ? 'border-red-500'
       : 'border-outline-variant focus:border-primary-container'
 
-  const emailBorder = emailOk
-    ? 'border-green-500'
-    : showEmailError
-      ? 'border-red-500'
-      : 'border-outline-variant focus:border-primary-container'
-
-  const handleSubmit = () => {
-    if (!canProceed || restoring) return
-    // Mark both as touched so any invalid field shows its error on submit attempt
-    setMobileTouched(true)
-    setEmailTouched(true)
-    if (canProceed) onStart()
+  const handleSubmit = async () => {
+    setTouched(true)
+    if (!emailOk || sending) return
+    const ok = await onSendLink(email.trim())
+    if (ok) setSent(true)
   }
 
   return (
@@ -78,102 +55,91 @@ export default function Landing({ email, setEmail, mobile, setMobile, onStart, o
         {/* ── Right form panel ── */}
         <div className="w-full md:w-1/2 flex flex-col items-center justify-center p-8 md:p-10 bg-surface">
 
-          {/* Logo */}
           <div className="mb-8">
-            {canGoToStories ? (
-              <button onClick={onGoToStories}
-                className="text-5xl font-extrabold text-primary-container hover:opacity-80 transition-opacity tracking-tight">
-                Kidly
-              </button>
-            ) : (
-              <h1 className="text-5xl font-extrabold text-primary-container tracking-tight">Kidly</h1>
-            )}
+            <h1 className="text-5xl font-extrabold text-primary-container tracking-tight">Kidly</h1>
           </div>
 
           <div className="w-full max-w-[340px] flex flex-col items-center text-center">
-            <h2 className="text-xl font-semibold text-on-surface mb-2">Welcome, Storyteller</h2>
-            <p className="text-sm text-on-surface-variant mb-6 leading-relaxed">
-              Record your voice once. Kidly narrates 15 bedtime stories so your child hears <em>you</em>.
-            </p>
+            {sent ? (
+              /* ── Check-inbox state ── */
+              <div className="space-y-5 w-full">
+                <div className="text-5xl">📬</div>
+                <h2 className="text-xl font-semibold text-on-surface">Check your inbox</h2>
+                <p className="text-sm text-on-surface-variant leading-relaxed">
+                  We sent a sign-in link to <strong className="text-on-surface">{email}</strong>.
+                  <br/>The link expires in 15 minutes.
+                </p>
+                <p className="text-xs text-on-surface-variant">
+                  Didn't get it?{' '}
+                  <button
+                    onClick={() => { setSent(false); setTouched(false) }}
+                    className="text-primary-container underline underline-offset-2 hover:opacity-80"
+                  >
+                    Try a different email
+                  </button>
+                </p>
+              </div>
+            ) : (
+              /* ── Email form state ── */
+              <>
+                <h2 className="text-xl font-semibold text-on-surface mb-2">Welcome, Storyteller</h2>
+                <p className="text-sm text-on-surface-variant mb-6 leading-relaxed">
+                  Enter your email and we'll send you a magic link — no password needed.
+                </p>
 
-            <div className="w-full space-y-1 mb-4">
-
-              {/* Mobile field */}
-              <div className="relative">
-                <input
-                  type="tel"
-                  value={mobileVal}
-                  onChange={e => setMobile(e.target.value)}
-                  onBlur={() => setMobileTouched(true)}
-                  onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-                  placeholder="Mobile number  e.g. +91 98765 43210"
-                  className={`w-full px-5 py-3.5 pr-10 rounded-full bg-surface-container border text-on-surface placeholder:text-on-surface-variant text-sm outline-none transition-colors ${mobileBorder}`}
-                />
-                {mobileOk && (
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500 font-bold text-sm">✓</span>
+                {verifyError && (
+                  <div className="w-full mb-4 px-4 py-3 rounded-xl bg-error/10 border border-error/30 text-error text-sm text-left">
+                    {verifyError}
+                  </div>
                 )}
-              </div>
-              {showMobileError && (
-                <p className="text-xs text-red-400 text-left pl-4 pb-1">
-                  Enter a 10-digit number (e.g. 9876543210) or include country code (e.g. +91 98765 43210)
-                </p>
-              )}
 
-              <div className="flex items-center gap-3 py-1">
-                <div className="flex-1 h-px" style={{background:'rgba(255,255,255,0.12)'}} />
-                <span className="text-xs text-on-surface-variant shrink-0">or</span>
-                <div className="flex-1 h-px" style={{background:'rgba(255,255,255,0.12)'}} />
-              </div>
+                <div className="w-full space-y-3 mb-4">
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      onBlur={() => setTouched(true)}
+                      onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+                      placeholder="your@email.com"
+                      className={`w-full px-5 py-3.5 pr-10 rounded-full bg-surface-container border text-on-surface placeholder:text-on-surface-variant text-sm outline-none transition-colors ${borderClass}`}
+                    />
+                    {emailOk && (
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500 font-bold text-sm">✓</span>
+                    )}
+                  </div>
+                  {showError && (
+                    <p className="text-xs text-red-400 text-left pl-4">
+                      Enter a valid email address
+                    </p>
+                  )}
+                  {sendError && (
+                    <p className="text-xs text-red-400 text-left pl-4">{sendError}</p>
+                  )}
+                </div>
 
-              {/* Email field */}
-              <div className="relative">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  onBlur={() => setEmailTouched(true)}
-                  onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-                  placeholder="Email address  e.g. name@example.com"
-                  className={`w-full px-5 py-3.5 pr-10 rounded-full bg-surface-container border text-on-surface placeholder:text-on-surface-variant text-sm outline-none transition-colors ${emailBorder}`}
-                />
-                {emailOk && (
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500 font-bold text-sm">✓</span>
-                )}
-              </div>
-              {showEmailError && (
-                <p className="text-xs text-red-400 text-left pl-4 pb-1">
-                  Enter a valid email address (e.g. name@example.com)
-                </p>
-              )}
+                <button
+                  onClick={handleSubmit}
+                  disabled={sending || !emailOk}
+                  className="w-full py-4 bg-primary-container text-on-primary-container font-bold rounded-full transition-all glow-primary btn-3d disabled:opacity-50 disabled:cursor-not-allowed mb-6"
+                >
+                  {sending ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
+                      Sending link…
+                    </span>
+                  ) : (
+                    'Send me a magic link →'
+                  )}
+                </button>
 
-              {/* Hint when both fields are empty */}
-              {!mobileVal && !email && (
-                <p className="text-xs text-on-surface-variant text-left pl-4 pt-1">
-                  You must enter a valid mobile number or email address.
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={handleSubmit}
-              disabled={restoring || !canProceed}
-              className="w-full py-4 bg-primary-container text-on-primary-container font-bold rounded-full transition-all glow-primary btn-3d disabled:opacity-50 disabled:cursor-not-allowed mb-6"
-            >
-              {restoring ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
-                  Restoring your voice…
-                </span>
-              ) : (
-                "Get Started — It's free for limited time"
-              )}
-            </button>
-
-            <div className="flex items-center justify-center gap-4 text-xs text-on-surface-variant flex-wrap">
-              <span className="flex items-center gap-1"><span className="text-secondary">✓</span> No password</span>
-              <span className="flex items-center gap-1"><span className="text-secondary">✓</span> 2 minutes</span>
-              <span className="flex items-center gap-1"><span className="text-secondary">✓</span> 15 stories</span>
-            </div>
+                <div className="flex items-center justify-center gap-4 text-xs text-on-surface-variant flex-wrap">
+                  <span className="flex items-center gap-1"><span className="text-secondary">✓</span> No password</span>
+                  <span className="flex items-center gap-1"><span className="text-secondary">✓</span> 2 minutes</span>
+                  <span className="flex items-center gap-1"><span className="text-secondary">✓</span> 15 stories</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
