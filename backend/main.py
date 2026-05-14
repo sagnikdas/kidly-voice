@@ -1,6 +1,9 @@
 import os
+import re
 import json
+import time
 import uuid
+import shutil
 import asyncio
 import hashlib
 import tomllib
@@ -67,8 +70,36 @@ CORS_ORIGINS: list[str] = (
     else _cfg.get("cors", {}).get("origins", ["*"])
 )
 
-# Max recording upload size in bytes — from config.toml [uploads].max_recording_mb
-MAX_REC_BYTES: int = _cfg.get("uploads", {}).get("max_recording_mb", 50) * 1024 * 1024
+# Per-chunk upload size cap — from config.toml [uploads].max_recording_mb.
+# A 60-second WAV at 48 kHz / 16-bit / stereo is ~11 MB, so 20 MB is a generous
+# upper bound on a single chunk for any reasonable audio format.
+MAX_REC_BYTES: int = _cfg.get("uploads", {}).get("max_recording_mb", 20) * 1024 * 1024
+
+# Per-session total upload cap — protects against an attacker spamming many
+# small uploads under one session_id to fill the volume. Multiple chunks plus
+# headroom — generous for real users (~3-4 takes), tight enough to stop abuse.
+MAX_SESSION_BYTES: int = _cfg.get("uploads", {}).get("max_session_mb", 40) * 1024 * 1024
+
+# Stale recording dirs older than this are reaped by the startup cleanup task.
+RECORDING_TTL_SECONDS = 1800  # 30 min
+RECORDING_PURGE_INTERVAL_SECONDS = 600  # check every 10 min
+
+# Cap concurrent outbound calls to Fish Audio. Combined with each endpoint's
+# rate limit, this bounds how much load a burst of cache-misses can throw at
+# the upstream provider, regardless of which endpoints triggered the burst.
+FA_CONCURRENCY = int(os.getenv("FISH_AUDIO_CONCURRENCY", "8"))
+_fa_sem = asyncio.Semaphore(FA_CONCURRENCY)
+
+# Trust proxy headers (Fly-Client-IP, X-Forwarded-For) only when running under
+# Fly.io — Fly sets FLY_APP_NAME automatically on every machine. Locally these
+# headers are spoofable, so we fall back to the direct socket peer.
+_TRUST_PROXY_HEADERS = bool(os.getenv("FLY_APP_NAME"))
+
+# UUID v4 — matches both the dashed canonical form and the 32-hex form.
+_SESSION_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    r"|^[0-9a-fA-F]{32}$"
+)
 
 log = logging.getLogger("kidly")
 
@@ -156,9 +187,107 @@ def _check_admin(request: Request):
     if not ADMIN_SECRET or request.headers.get("X-Admin-Key", "") != ADMIN_SECRET:
         raise HTTPException(403, "Admin access denied.")
 
-# 60 requests/minute per IP applies to every route by default.
-# Individual endpoints below may override with stricter limits.
-limiter = Limiter(key_func=get_remote_address, default_limits=[RL_GLOBAL])
+
+def _validate_session_id(session_id: str) -> None:
+    """Reject malformed session_ids early so attackers cannot create arbitrary
+    directories under tmp/recordings/ (e.g. ../, $RANDOM_STRING_OF_THE_HOUR)."""
+    if not _SESSION_ID_RE.match(session_id or ""):
+        raise HTTPException(400, "Invalid session_id format")
+
+
+def _session_total_bytes(session_dir: Path) -> int:
+    if not session_dir.exists():
+        return 0
+    return sum(f.stat().st_size for f in session_dir.glob("*") if f.is_file())
+
+
+def _client_ip(request: Request) -> str:
+    """Rate-limit key. On Fly.io reads Fly-Client-IP (always set by their proxy),
+    falling back to the first X-Forwarded-For hop, then the raw socket peer.
+    Headers are trusted only when FLY_APP_NAME is set — locally and in any
+    other environment we use the direct socket peer to avoid spoofing."""
+    if _TRUST_PROXY_HEADERS:
+        fly_ip = request.headers.get("Fly-Client-IP")
+        if fly_ip:
+            return fly_ip
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",", 1)[0].strip()
+    return get_remote_address(request)
+
+
+async def _fa_request(
+    method: str,
+    url: str,
+    *,
+    timeout: float = 60,
+    retries: int = 1,
+    **kwargs,
+) -> httpx.Response:
+    """Wrap every outbound Fish Audio call with two protections:
+
+    1. A global semaphore caps concurrent in-flight calls (FA_CONCURRENCY).
+       Even if many endpoints simultaneously hit cache-misses, we never fan
+       out more than this many requests to api.fish.audio at once.
+    2. A one-shot retry on transient upstream errors (502 / 503 / 504,
+       network errors, timeouts). 500 is NOT retried — a 500 means Fish
+       Audio's state is unknown and retrying TTS calls could double-charge.
+       4xx is never retried — it's a client error and won't fix itself.
+    """
+    last_exc: Optional[Exception] = None
+    response: Optional[httpx.Response] = None
+    for attempt in range(retries + 1):
+        try:
+            async with _fa_sem:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.request(method, url, **kwargs)
+            if response.status_code not in (502, 503, 504) or attempt >= retries:
+                return response
+            log.warning(
+                "[FA RETRY] %s %s status=%d attempt=%d",
+                method, url, response.status_code, attempt + 1,
+            )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_exc = exc
+            log.warning(
+                "[FA RETRY] %s %s exc=%s attempt=%d",
+                method, url, exc, attempt + 1,
+            )
+            if attempt >= retries:
+                raise
+        await asyncio.sleep(0.25 + 0.1 * attempt)
+    if response is not None:
+        return response
+    # Unreachable when retries are exhausted via exception (we re-raise above),
+    # but keeps the type checker happy.
+    assert last_exc is not None
+    raise last_exc
+
+
+async def _purge_stale_recordings_loop() -> None:
+    """Background task: every RECORDING_PURGE_INTERVAL_SECONDS, delete any
+    session dir under REC_DIR whose mtime is older than RECORDING_TTL_SECONDS.
+    Bounds disk usage even if users abandon the flow mid-upload."""
+    while True:
+        try:
+            now = time.time()
+            for d in REC_DIR.iterdir():
+                if not d.is_dir():
+                    continue
+                try:
+                    if now - d.stat().st_mtime > RECORDING_TTL_SECONDS:
+                        shutil.rmtree(d, ignore_errors=True)
+                        log.info("[CLEANUP] purged stale session %s", d.name)
+                except FileNotFoundError:
+                    pass
+        except Exception as exc:
+            log.warning("[CLEANUP] error %s", exc)
+        await asyncio.sleep(RECORDING_PURGE_INTERVAL_SECONDS)
+
+
+# Per-route limits below override this. Keys are real client IPs (see
+# `_client_ip` — Fly-Client-IP under Fly, socket peer otherwise).
+limiter = Limiter(key_func=_client_ip, default_limits=[RL_GLOBAL])
 
 app = FastAPI(title="Kidly Voice")
 app.state.limiter = limiter
@@ -170,6 +299,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _on_startup() -> None:
+    asyncio.create_task(_purge_stale_recordings_loop())
 
 STORIES: dict[str, dict] = {
     "fox": {
@@ -583,20 +717,26 @@ async def _preload_stories_bg(voice_id: str) -> None:
         if audio_path.exists():
             state["ready"] += 1
             return
+        # Nested semaphores: per-voice cap (sem) on top of the global FA cap
+        # inside _fa_request. Per-voice ensures one user's preload doesn't
+        # burst all 15 stories at once; global ensures multiple onboardings
+        # don't collectively bury Fish Audio.
         async with sem:
             try:
-                async with httpx.AsyncClient(timeout=120) as client:
-                    r = await client.post(
-                        "https://api.fish.audio/v1/tts",
-                        headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
-                        json={
-                            "text": STORIES[story_key]["content"],
-                            "reference_id": voice_id,
-                            "format": "mp3",
-                            "mp3_bitrate": FA_TTS_BITRATE,
-                            "latency": "normal",
-                        },
-                    )
+                r = await _fa_request(
+                    "POST",
+                    "https://api.fish.audio/v1/tts",
+                    headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "text": STORIES[story_key]["content"],
+                        "reference_id": voice_id,
+                        "format": "mp3",
+                        "mp3_bitrate": FA_TTS_BITRATE,
+                        "latency": "normal",
+                    },
+                    timeout=120,
+                    retries=0,
+                )
                 if r.status_code < 400:
                     audio_path.write_bytes(r.content)
                     state["ready"] += 1
@@ -611,11 +751,13 @@ async def _preload_stories_bg(voice_id: str) -> None:
     # All stories cached — free the Fish Audio voice slot so new users can onboard.
     if state["failed"] == 0 and FA_KEY:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                await client.delete(
-                    f"https://api.fish.audio/model/{voice_id}",
-                    headers={"Authorization": f"Bearer {FA_KEY}"},
-                )
+            await _fa_request(
+                "DELETE",
+                f"https://api.fish.audio/model/{voice_id}",
+                headers={"Authorization": f"Bearer {FA_KEY}"},
+                timeout=30,
+                retries=1,
+            )
             log.warning("[VOICE DELETED] voice_id=%s all stories cached", voice_id)
         except Exception as exc:
             log.warning("[VOICE DELETE FAILED] voice_id=%s err=%s", voice_id, exc)
@@ -674,10 +816,10 @@ async def upload_recording(
     session_id: str = Form(...),
     is_first: str = Form("false"),
 ):
+    _validate_session_id(session_id)
     session_dir = REC_DIR / session_id
     # Clear previous uploads when starting a fresh batch (e.g. on retry)
     if is_first.lower() == "true" and session_dir.exists():
-        import shutil
         shutil.rmtree(session_dir)
     session_dir.mkdir(exist_ok=True)
     ext = _resolve_recording_ext(file.content_type, file.filename)
@@ -685,6 +827,12 @@ async def upload_recording(
     content = await file.read()
     if len(content) > MAX_REC_BYTES:
         raise HTTPException(413, f"File too large — maximum {MAX_REC_BYTES // 1024 // 1024} MB per chunk.")
+    if _session_total_bytes(session_dir) + len(content) > MAX_SESSION_BYTES:
+        raise HTTPException(
+            413,
+            f"Session upload total exceeds {MAX_SESSION_BYTES // 1024 // 1024} MB — "
+            "please start a new recording session.",
+        )
     (session_dir / fname).write_bytes(content)
     return {"ok": True}
 
@@ -695,6 +843,7 @@ async def clone_voice(request: Request, req: CloneRequest):
     if not FA_KEY:
         raise HTTPException(500, "FISH_AUDIO_API_KEY not set — add it to .env")
 
+    _validate_session_id(req.session_id)
     session_dir = REC_DIR / req.session_id
     audio_files = (
         sorted(f for f in session_dir.glob("*") if f.is_file() and f.suffix.lower() in AUDIO_EXTS)
@@ -716,26 +865,28 @@ async def clone_voice(request: Request, req: CloneRequest):
         mime = _EXT_TO_MIME.get(f.suffix.lower(), "application/octet-stream")
         upload_files.append(("voices", (f.name, content, mime)))
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(
-            "https://api.fish.audio/model",
-            headers={"Authorization": f"Bearer {FA_KEY}"},
-            data={"type": "tts", "title": req.label, "train_mode": "fast", "visibility": "private"},
-            files=upload_files,
-        )
-        if r.status_code >= 400:
-            body = r.text.lower()
-            if "short" in body or "minimum" in body or "not enough" in body:
-                raise HTTPException(400, "Recording too short — please record at least 60 seconds of clear audio and try again.")
-            raise HTTPException(r.status_code, r.text)
+    # No retry on /model — it's a non-idempotent paid operation.
+    r = await _fa_request(
+        "POST",
+        "https://api.fish.audio/model",
+        headers={"Authorization": f"Bearer {FA_KEY}"},
+        data={"type": "tts", "title": req.label, "train_mode": "fast", "visibility": "private"},
+        files=upload_files,
+        timeout=120,
+        retries=0,
+    )
+    if r.status_code >= 400:
+        body = r.text.lower()
+        if "short" in body or "minimum" in body or "not enough" in body:
+            raise HTTPException(400, "Recording too short — please record at least 60 seconds of clear audio and try again.")
+        raise HTTPException(r.status_code, r.text)
 
-        payload = r.json()
-        voice_id = payload.get("_id") or payload.get("id")
-        if not voice_id:
-            raise HTTPException(500, f"Fish Audio did not return a model ID: {payload}")
+    payload = r.json()
+    voice_id = payload.get("_id") or payload.get("id")
+    if not voice_id:
+        raise HTTPException(500, f"Fish Audio did not return a model ID: {payload}")
 
     # Recordings are only needed for the clone call — delete them immediately.
-    import shutil
     if session_dir.exists():
         shutil.rmtree(session_dir, ignore_errors=True)
 
@@ -770,21 +921,24 @@ async def voice_preview(request: Request, req: VoicePreviewRequest):
     cache_path = TTS_DIR / f"{cache_key}.mp3"
 
     if not cache_path.exists():
-        async with httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(
-                "https://api.fish.audio/v1/tts",
-                headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
-                json={
-                    "text": PREVIEW_TEXT,
-                    "reference_id": req.voice_id,
-                    "format": "mp3",
-                    "mp3_bitrate": FA_TTS_BITRATE,
-                    "latency": "normal",
-                },
-            )
-            if r.status_code >= 400:
-                raise HTTPException(r.status_code, r.text)
-            cache_path.write_bytes(r.content)
+        # No retry — each TTS call is billable; on 5xx we'd rather fail fast.
+        r = await _fa_request(
+            "POST",
+            "https://api.fish.audio/v1/tts",
+            headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
+            json={
+                "text": PREVIEW_TEXT,
+                "reference_id": req.voice_id,
+                "format": "mp3",
+                "mp3_bitrate": FA_TTS_BITRATE,
+                "latency": "normal",
+            },
+            timeout=60,
+            retries=0,
+        )
+        if r.status_code >= 400:
+            raise HTTPException(r.status_code, r.text)
+        cache_path.write_bytes(r.content)
 
     return {"audio_url": f"/api/audio/{cache_key}.mp3"}
 
@@ -813,20 +967,22 @@ async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
             "from_cache": True,
         }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(
-            "https://api.fish.audio/v1/tts",
-            headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
-            json={
-                "text": story["content"],
-                "reference_id": req.voice_id,
-                "format": "mp3",
-                "mp3_bitrate": FA_TTS_BITRATE,
-                "latency": "normal",
-            },
-        )
-        if r.status_code >= 400:
-            raise HTTPException(r.status_code, r.text)
+    r = await _fa_request(
+        "POST",
+        "https://api.fish.audio/v1/tts",
+        headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
+        json={
+            "text": story["content"],
+            "reference_id": req.voice_id,
+            "format": "mp3",
+            "mp3_bitrate": FA_TTS_BITRATE,
+            "latency": "normal",
+        },
+        timeout=120,
+        retries=0,
+    )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text)
 
     audio_path.write_bytes(r.content)
     return {
@@ -853,8 +1009,9 @@ async def preload_stories(request: Request, req: PreloadRequest):
 
 
 @app.get("/api/stories/preload-status")
-async def preload_status(voice_id: str):
+async def preload_status(voice_id: str, session_token: str):
     """Return how many stories have been pre-generated for this voice."""
+    _validate_session(voice_id, session_token)
     total = len(STORIES)
     state = _preload_state.get(voice_id)
     if state is None:
@@ -995,72 +1152,87 @@ async def get_default_voice(request: Request):
 
 
 # ── Voice management (admin) ───────────────────────────────────────────────────
+# Admin endpoints are already gated by `X-Admin-Key`. The per-IP rate limits
+# below are defense-in-depth: if ADMIN_SECRET ever leaks, the wipe-all endpoint
+# is still bounded to 5/hour per attacker IP.
 
 @app.get("/api/admin/voices")
+@limiter.limit("30/hour")
 async def list_cloned_voices(request: Request):
     """List all voice models owned by this account on Fish Audio."""
     _check_admin(request)
     if not FA_KEY:
         raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(
-            "https://api.fish.audio/model",
-            headers={"Authorization": f"Bearer {FA_KEY}"},
-            params={"self": "true", "page_size": 100, "page_number": 1},
-        )
-        if r.status_code >= 400:
-            raise HTTPException(r.status_code, r.text)
-        data = r.json()
-        voices = [
-            {"voice_id": v["_id"], "name": v.get("title"), "state": v.get("state")}
-            for v in data.get("items", [])
-        ]
-        return {"voices": voices, "count": len(voices)}
+    r = await _fa_request(
+        "GET",
+        "https://api.fish.audio/model",
+        headers={"Authorization": f"Bearer {FA_KEY}"},
+        params={"self": "true", "page_size": 100, "page_number": 1},
+        timeout=30,
+        retries=1,
+    )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text)
+    data = r.json()
+    voices = [
+        {"voice_id": v["_id"], "name": v.get("title"), "state": v.get("state")}
+        for v in data.get("items", [])
+    ]
+    return {"voices": voices, "count": len(voices)}
 
 
 @app.delete("/api/admin/voices/{voice_id}")
+@limiter.limit("20/hour")
 async def delete_voice(request: Request, voice_id: str):
     """Delete a single voice model by ID."""
     _check_admin(request)
     if not FA_KEY:
         raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.delete(
-            f"https://api.fish.audio/model/{voice_id}",
-            headers={"Authorization": f"Bearer {FA_KEY}"},
-        )
-        if r.status_code >= 400:
-            raise HTTPException(r.status_code, r.text)
-        return {"ok": True, "deleted_voice_id": voice_id}
+    r = await _fa_request(
+        "DELETE",
+        f"https://api.fish.audio/model/{voice_id}",
+        headers={"Authorization": f"Bearer {FA_KEY}"},
+        timeout=30,
+        retries=1,
+    )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text)
+    return {"ok": True, "deleted_voice_id": voice_id}
 
 
 @app.delete("/api/admin/voices")
+@limiter.limit("5/hour")
 async def delete_all_cloned_voices(request: Request):
     """Delete every owned voice model on the account. Irreversible."""
     _check_admin(request)
     if not FA_KEY:
         raise HTTPException(500, "FISH_AUDIO_API_KEY not set")
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.get(
-            "https://api.fish.audio/model",
+    r = await _fa_request(
+        "GET",
+        "https://api.fish.audio/model",
+        headers={"Authorization": f"Bearer {FA_KEY}"},
+        params={"self": "true", "page_size": 100, "page_number": 1},
+        timeout=60,
+        retries=1,
+    )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, r.text)
+    items = r.json().get("items", [])
+
+    deleted, failed = [], []
+    for v in items:
+        dr = await _fa_request(
+            "DELETE",
+            f"https://api.fish.audio/model/{v['_id']}",
             headers={"Authorization": f"Bearer {FA_KEY}"},
-            params={"self": "true", "page_size": 100, "page_number": 1},
+            timeout=30,
+            retries=1,
         )
-        if r.status_code >= 400:
-            raise HTTPException(r.status_code, r.text)
-        items = r.json().get("items", [])
+        (deleted if dr.status_code < 400 else failed).append(
+            {"voice_id": v["_id"], "name": v.get("title")}
+        )
 
-        deleted, failed = [], []
-        for v in items:
-            dr = await client.delete(
-                f"https://api.fish.audio/model/{v['_id']}",
-                headers={"Authorization": f"Bearer {FA_KEY}"},
-            )
-            (deleted if dr.status_code < 400 else failed).append(
-                {"voice_id": v["_id"], "name": v.get("title")}
-            )
-
-        return {"deleted": deleted, "failed": failed, "total_deleted": len(deleted)}
+    return {"deleted": deleted, "failed": failed, "total_deleted": len(deleted)}
 
 
 # Serve the React build — must be last so /api/* routes take priority.
