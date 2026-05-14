@@ -36,6 +36,7 @@ export default function StoriesPhase({ voiceId, sessionToken, userDisplay, onReR
     catch { return new Set() }
   })
   const [cachedChecked, setCachedChecked] = useState(false)
+  const [preloadDone, setPreloadDone] = useState(false)
   const [audioCache, setAudioCache] = useState({})       // `${voiceId}:${story.key}` → { audioUrl, text }
   const [loadingKey, setLoadingKey] = useState(null)
   const [loadError, setLoadError] = useState('')
@@ -60,6 +61,7 @@ export default function StoriesPhase({ voiceId, sessionToken, userDisplay, onReR
     try { const s = localStorage.getItem(`kidly_cached_${voiceId}`); setCachedKeys(new Set(s ? JSON.parse(s) : [])) }
     catch { setCachedKeys(new Set()) }
     setCachedChecked(false)
+    setPreloadDone(false)
     setAudioCache({})
     setReaderState(null)
     setLoadError('')
@@ -91,20 +93,40 @@ export default function StoriesPhase({ voiceId, sessionToken, userDisplay, onReR
     if (!voiceId || !sessionToken) return
     let cancelled = false
     let timer
+
+    const ensurePreload = () => {
+      fetch('/api/stories/preload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice_id: voiceId, session_token: sessionToken }),
+      }).catch(() => {})
+    }
+
+    const refreshCached = async () => {
+      const r2 = await fetch(`/api/stories/cached?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
+      if (r2.ok && !cancelled) {
+        const data = await r2.json()
+        if (data?.cached) setCachedKeys(new Set(data.cached))
+      }
+    }
+
     const check = async () => {
       if (cancelled) return
       try {
         const r = await fetch(`/api/stories/preload-status?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
         if (!r.ok || cancelled) return
         const status = await r.json()
-        const r2 = await fetch(`/api/stories/cached?voice_id=${encodeURIComponent(voiceId)}&session_token=${encodeURIComponent(sessionToken)}`)
-        if (r2.ok && !cancelled) {
-          const data = await r2.json()
-          if (data?.cached) setCachedKeys(new Set(data.cached))
+        await refreshCached()
+        if (status.done) {
+          setPreloadDone(true)
+          return
         }
-        if (!status.done && !cancelled) timer = setTimeout(check, 15000)
+        // Preload not done — ensure task is running (safe if already running)
+        ensurePreload()
+        if (!cancelled) timer = setTimeout(check, 15000)
       } catch {}
     }
+
     timer = setTimeout(check, 8000)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [voiceId, sessionToken])
@@ -326,7 +348,7 @@ export default function StoriesPhase({ voiceId, sessionToken, userDisplay, onReR
           </div>
 
           {/* Story generation progress */}
-          {cachedChecked && cachedKeys.size < STORIES.length && (
+          {!preloadDone && cachedChecked && cachedKeys.size < STORIES.length && (
             <div className="mb-4 flex items-center gap-2.5 bg-surface-container-high border border-outline-variant/20 rounded-xl px-4 py-2.5">
               <span className="w-3 h-3 border-2 border-on-surface-variant/30 border-t-on-surface-variant rounded-full animate-spin shrink-0" />
               <span className="text-xs text-on-surface-variant">
