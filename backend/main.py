@@ -297,9 +297,9 @@ async def _send_magic_email(to_email: str, link: str) -> None:
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
             json={
-                "from": "Kidly <onboarding@resend.dev>",
+                "from": "Kidly <parent@kidly.me>",
                 "to": [to_email],
-                "reply_to": ["kidlyvoice@gmail.com"],
+                "reply_to": ["parent@kidly.me"],
                 "subject": "Your Kidly sign-in link",
                 "html": html,
             },
