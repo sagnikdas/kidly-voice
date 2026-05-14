@@ -46,6 +46,10 @@ except FileNotFoundError:
 
 RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
 
+VAPID_PRIVATE_KEY: str = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_PUBLIC_KEY: str = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_SUBJECT: str = os.getenv("VAPID_SUBJECT", "mailto:parent@kidly.me")
+
 # Auto-detect base URL for magic links. On Fly.io, FLY_APP_NAME is always set.
 _fly_app = os.getenv("FLY_APP_NAME", "")
 APP_BASE_URL: str = os.getenv(
@@ -347,9 +351,79 @@ app.add_middleware(
 )
 
 
+PUSH_MESSAGES = [
+    ("Time for a bedtime story! 🌙", "Open Kidly and hear a story in your own voice tonight."),
+    ("Your little one is waiting 💫", "Start a bedtime story now — just one tap away."),
+    ("Sweet dreams start here 🌟", "Play a Kidly story tonight and make bedtime magical."),
+    ("Story time! ✨", "Your voice is ready. Pick a story and tuck them in."),
+]
+
+async def _send_one_push(subscription: dict, title: str, body: str) -> bool:
+    """Send a single web push notification. Returns True on success."""
+    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        return False
+    try:
+        from pywebpush import webpush, WebPushException
+        payload = json.dumps({"title": title, "body": body, "url": "/"})
+        await asyncio.to_thread(
+            webpush,
+            subscription_info=subscription,
+            data=payload,
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": VAPID_SUBJECT},
+        )
+        return True
+    except Exception as exc:
+        log.warning("[PUSH] send failed: %s", exc)
+        return False
+
+
+async def _daily_push_loop() -> None:
+    """Send a daily nudge at 19:30 IST (14:00 UTC) to all subscribed users."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            # Seconds until next 14:00 UTC
+            target_hour, target_minute = 14, 0
+            seconds_until = (
+                (target_hour - now.hour) * 3600
+                + (target_minute - now.minute) * 60
+                - now.second
+            )
+            if seconds_until <= 0:
+                seconds_until += 86400  # wait until tomorrow
+            await asyncio.sleep(seconds_until)
+
+            users = _load_users()
+            idx = int(time.time() // 86400) % len(PUSH_MESSAGES)
+            title, body = PUSH_MESSAGES[idx]
+            sent = failed = removed = 0
+            for token, session in list(users["sessions"].items()):
+                sub = session.get("push_subscription")
+                if not sub:
+                    continue
+                ok = await _send_one_push(sub, title, body)
+                if ok:
+                    sent += 1
+                else:
+                    # Remove stale/invalid subscriptions
+                    session.pop("push_subscription", None)
+                    failed += 1
+                    removed += 1
+            if removed:
+                _save_users(users)
+            log.info("[PUSH DAILY] sent=%d failed=%d removed=%d", sent, failed, removed)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            log.warning("[PUSH DAILY] error: %s", exc)
+            await asyncio.sleep(3600)
+
+
 @app.on_event("startup")
 async def _on_startup() -> None:
     asyncio.create_task(_purge_stale_recordings_loop())
+    asyncio.create_task(_daily_push_loop())
 
 STORIES: dict[str, dict] = {
     "fox": {
@@ -850,6 +924,11 @@ class PreloadRequest(BaseModel):
     session_token: str
 
 
+class PushSubscribeRequest(BaseModel):
+    session_token: str
+    subscription: dict  # {endpoint, keys: {p256dh, auth}}
+
+
 PREVIEW_TEXT = (
     "Hello, little one! Close your eyes and listen. This is your very own bedtime storyteller, "
     "ready to read you the most wonderful stories. Sweet dreams!"
@@ -1228,6 +1307,62 @@ async def save_feedback(request: Request, req: FeedbackRequest):
     FEEDBACK_FILE.write_text(json.dumps(existing, indent=2))
     log.warning("[FEEDBACK] email=%s msg=%s", req.email, (req.message or "")[:120])
     return {"ok": True}
+
+
+@app.get("/api/push/vapid-public-key")
+async def get_vapid_public_key():
+    if not VAPID_PUBLIC_KEY:
+        raise HTTPException(503, "Push notifications not configured.")
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+
+@app.post("/api/push/subscribe")
+@limiter.limit("20/hour")
+async def push_subscribe(request: Request, req: PushSubscribeRequest):
+    users = _load_users()
+    session = users["sessions"].get(req.session_token)
+    if not session:
+        raise HTTPException(403, "Invalid session.")
+    if not req.subscription.get("endpoint"):
+        raise HTTPException(400, "Invalid subscription object.")
+    session["push_subscription"] = req.subscription
+    _save_users(users)
+    return {"ok": True}
+
+
+@app.delete("/api/push/subscribe")
+@limiter.limit("20/hour")
+async def push_unsubscribe(request: Request, session_token: str):
+    users = _load_users()
+    session = users["sessions"].get(session_token)
+    if not session:
+        raise HTTPException(403, "Invalid session.")
+    session.pop("push_subscription", None)
+    _save_users(users)
+    return {"ok": True}
+
+
+@app.post("/api/admin/push/notify")
+@limiter.limit("10/hour")
+async def admin_push_notify(request: Request, title: str = "Time for a bedtime story! 🌙", body: str = "Open Kidly and hear a story in your own voice tonight."):
+    """Send a push notification to all subscribed users. Admin only."""
+    _check_admin(request)
+    users = _load_users()
+    sent = failed = removed = 0
+    for token, session in list(users["sessions"].items()):
+        sub = session.get("push_subscription")
+        if not sub:
+            continue
+        ok = await _send_one_push(sub, title, body)
+        if ok:
+            sent += 1
+        else:
+            session.pop("push_subscription", None)
+            failed += 1
+            removed += 1
+    if removed:
+        _save_users(users)
+    return {"sent": sent, "failed": failed, "removed_stale": removed}
 
 
 @app.get("/api/health")

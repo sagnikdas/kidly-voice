@@ -30,6 +30,18 @@ if [[ -z "${RESEND_API_KEY:-}" ]]; then
   exit 1
 fi
 
+if [[ -z "${VAPID_PRIVATE_KEY:-}" ]]; then
+  echo "ERROR: VAPID_PRIVATE_KEY is not set."
+  echo "       Run: export VAPID_PRIVATE_KEY=<your-key>"
+  exit 1
+fi
+
+if [[ -z "${VAPID_PUBLIC_KEY:-}" ]]; then
+  echo "ERROR: VAPID_PUBLIC_KEY is not set."
+  echo "       Run: export VAPID_PUBLIC_KEY=<your-key>"
+  exit 1
+fi
+
 cd "$(dirname "$0")"
 
 echo ""
@@ -57,7 +69,13 @@ fi
 # ── set secrets ───────────────────────────────────────────────────────────────
 
 echo "→ Setting secrets..."
-fly secrets set FISH_AUDIO_API_KEY="$FISH_AUDIO_API_KEY" RESEND_API_KEY="$RESEND_API_KEY" --app "$APP"
+fly secrets set \
+  FISH_AUDIO_API_KEY="$FISH_AUDIO_API_KEY" \
+  RESEND_API_KEY="$RESEND_API_KEY" \
+  VAPID_PRIVATE_KEY="$VAPID_PRIVATE_KEY" \
+  VAPID_PUBLIC_KEY="$VAPID_PUBLIC_KEY" \
+  VAPID_SUBJECT="mailto:parent@kidly.me" \
+  --app "$APP"
 
 # ── build + deploy ────────────────────────────────────────────────────────────
 

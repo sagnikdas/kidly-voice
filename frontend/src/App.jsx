@@ -6,6 +6,7 @@ import CloningPhase from './components/CloningPhase'
 import StoriesPhase from './components/StoriesPhase'
 import SettingsDrawer from './components/SettingsDrawer'
 import InstallPrompt from './components/InstallPrompt'
+import PushPermission from './components/PushPermission'
 import { OSContext, detectOS } from './utils/os'
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
   const [theme, setThemeState] = useState(() => localStorage.getItem('kidly_theme') || 'dark')
   const [fontSize, setFontSizeState] = useState(() => localStorage.getItem('kidly_font_size') || 'md')
   const [showSettings, setShowSettings] = useState(false)
+  const [showPushPrompt, setShowPushPrompt] = useState(false)
 
   // Magic-link flow state
   const [sending, setSending] = useState(false)
@@ -286,6 +288,15 @@ export default function App() {
         onShow={() => setShowInstall(true)}
       />}
 
+      {phase === 'stories' && <StoriesPushTrigger onShow={() => setShowPushPrompt(true)} />}
+
+      {showPushPrompt && !showInstall && (
+        <PushPermission
+          sessionToken={sessionToken}
+          onDismiss={() => setShowPushPrompt(false)}
+        />
+      )}
+
       {showInstall && (
         <InstallPrompt
           deferredPrompt={deferredPromptRef.current}
@@ -329,6 +340,19 @@ function StoriesInstallTrigger({ os, deferredPromptRef, onShow }) {
     const t = setTimeout(() => {
       if (os === 'ios' || deferredPromptRef.current) onShow()
     }, 5000)
+    return () => clearTimeout(t)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+// Shows the push permission banner 30 seconds after reaching Stories.
+// Only shown if: push is supported, permission not yet decided, and not already asked.
+function StoriesPushTrigger({ onShow }) {
+  useEffect(() => {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return
+    if (Notification.permission !== 'default') return
+    if (localStorage.getItem('kidly_push_asked')) return
+
+    const t = setTimeout(onShow, 30000)
     return () => clearTimeout(t)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 }
