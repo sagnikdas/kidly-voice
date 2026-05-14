@@ -137,3 +137,96 @@ html[data-theme="light"] {
 .safe-bottom { padding-bottom: var(--sab); }
 .h-header    { height: calc(56px + var(--sat)); }
 .pt-header   { padding-top: calc(56px + var(--sat)); }
+
+@keyframes confettiFall {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(540deg); opacity: 0; }
+}
+
+/* Page / phase enter */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* StoryReader fullscreen enter — subtle upward drift */
+@keyframes readerEnter {
+  from { opacity: 0; transform: translateY(3.5%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Hero emoji on StoryReader — spring scale-in */
+@keyframes heroScale {
+  from { opacity: 0; transform: scale(1.14); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Settings / bottom-sheet enter */
+@keyframes drawerEnter {
+  from { opacity: 0.5; transform: translateY(100%); }
+  to   { opacity: 1;   transform: translateY(0); }
+}
+
+/* Backdrop fade */
+@keyframes backdropFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Card / tile stagger */
+@keyframes staggerIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)     scale(1); }
+}
+
+/* ── OS-adaptive overrides ─────────────────────────────────────
+   Applied via data-os="ios|android" set on <html> at runtime.
+   Uses !important to override the animation shorthand set inline
+   on components (CSS !important beats inline non-!important). */
+
+/* iOS: springy overshoot — matches UIKit spring curves */
+html[data-os="ios"] .anim-drawer {
+  animation-timing-function: cubic-bezier(0.34, 1.08, 0.64, 1) !important;
+  animation-duration: 0.44s !important;
+}
+html[data-os="ios"] .anim-reader {
+  animation-timing-function: cubic-bezier(0.34, 1.08, 0.64, 1) !important;
+  animation-duration: 0.42s !important;
+}
+
+/* Android: M3 emphasized-decelerate easing */
+html[data-os="android"] .anim-drawer {
+  animation-timing-function: cubic-bezier(0.05, 0.7, 0.1, 1.0) !important;
+  animation-duration: 0.3s !important;
+}
+html[data-os="android"] .anim-reader {
+  animation-timing-function: cubic-bezier(0.05, 0.7, 0.1, 1.0) !important;
+  animation-duration: 0.28s !important;
+}
+
+/* Android: Material Design 3 state-layer ripple on interactive elements.
+   Requires overflow:hidden on the host element (added via md-ripple class). */
+html[data-os="android"] .md-ripple {
+  position: relative;
+  overflow: hidden;
+}
+html[data-os="android"] .md-ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.18);
+  opacity: 0;
+  transition: opacity 0.12s;
+  border-radius: inherit;
+  pointer-events: none;
+}
+html[data-os="android"] .md-ripple:active::after {
+  opacity: 1;
+}
+
+/* iOS: suppress active states on tappable elements — iOS dims instead of ripples */
+html[data-os="ios"] button:active,
+html[data-os="ios"] [role="button"]:active {
+  opacity: 0.55 !important;
+  transition: opacity 0.05s !important;
+}

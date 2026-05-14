@@ -15,19 +15,20 @@ const MORAL_BG = {
   comfort:        'from-sky-950 to-cyan-900',
 }
 
-export default function StoryCard({ story, hasPlayed, loading, isCached, onPlayClick, isSelected }) {
+export default function StoryCard({ story, hasPlayed, loading, isCached, onPlayClick, isSelected, animStyle }) {
   const bg = MORAL_BG[story.moral] || 'from-surface-container to-surface-container-high'
 
   return (
     <div
       onClick={() => !loading && onPlayClick(story)}
-      className={`overflow-hidden rounded-2xl bg-surface-container-high cursor-pointer transition-all active:scale-[0.97] border-2 ${
+      className={`overflow-hidden rounded-2xl bg-surface-container-high cursor-pointer transition-all active:scale-[0.97] border-2 md-ripple ${
         isSelected ? 'border-primary-container' : 'border-transparent hover:border-outline-variant/30'
       }`}
       style={{
         boxShadow: isSelected
           ? '0 0 0 3px rgba(255,214,0,0.25), 0 4px 20px rgba(0,0,0,0.5)'
           : '0 2px 12px rgba(0,0,0,0.35)',
+        ...animStyle,
       }}
     >
       {/* Emoji tile */}
