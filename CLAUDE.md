@@ -57,13 +57,11 @@ All 15 story texts are hardcoded in `backend/main.py` (`STORIES` dict) and mirro
 
 ### Word-highlight sync
 
-`POST /api/stories/speak-timestamped` returns `{audio_url, alignment, story_text}`. `alignment.characters` / `character_start_times_seconds` / `character_end_times_seconds` come directly from Fish Audio's timestamped TTS response. `StoryReader` builds per-word timings from this alignment via `buildWordTimings()`, falling back to even distribution (`buildEvenTimings()`) when alignment is absent.
+`POST /api/stories/speak-timestamped` returns `{audio_url, story_text, from_cache}`. Fish Audio's `/v1/tts` endpoint does not return per-character timestamps, so `StoryReader` evenly distributes word timings across the audio duration via `buildEvenTimings()`.
 
 ## Configuration
 
 `backend/config.toml` controls rate limits, demo voice ID, max upload size, and CORS origins — no code change needed for these. In production, override with environment variables (`CORS_ORIGINS`, `FISH_AUDIO_API_KEY`, `ADMIN_SECRET`).
-
-Note: `config.toml` comments mention ElevenLabs — these are outdated; the active provider is Fish Audio throughout.
 
 ## Deployment
 

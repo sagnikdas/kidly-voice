@@ -53,9 +53,7 @@ RL_GLOBAL           = _rl.get("global_default",           "60/minute")
 RL_RECORDING        = _rl.get("recording_upload",         "30/minute")
 RL_VOICE_CLONE      = _rl.get("voice_clone",              "5/hour")
 RL_VOICE_PREVIEW    = _rl.get("voice_preview",            "10/hour")
-RL_STORY_SPEAK      = _rl.get("story_speak",              "30/hour")
 RL_STORY_SPEAK_TS   = _rl.get("story_speak_timestamped",  "30/hour")
-RL_SPEAK_CUSTOM     = _rl.get("voice_speak_custom",       "20/hour")
 RL_USER_SAVE        = _rl.get("user_save",                "10/hour")
 RL_USER_LOOKUP      = _rl.get("user_lookup",              "20/hour")
 RL_FEEDBACK         = _rl.get("feedback",                 "5/hour")
@@ -628,12 +626,6 @@ class CloneRequest(BaseModel):
     label: str = "My Kidly Voice"
 
 
-class SpeakRequest(BaseModel):
-    voice_id: str
-    story_key: str
-    session_token: str
-
-
 class SaveUserRequest(BaseModel):
     session_token: str
     email: Optional[str] = None
@@ -660,12 +652,6 @@ class VoicePreviewRequest(BaseModel):
 class SpeakTimestampedRequest(BaseModel):
     voice_id: str
     story_key: str
-    session_token: str
-
-
-class CustomSpeakRequest(BaseModel):
-    voice_id: str
-    text: str
     session_token: str
 
 
@@ -803,43 +789,6 @@ async def voice_preview(request: Request, req: VoicePreviewRequest):
     return {"audio_url": f"/api/audio/{cache_key}.mp3"}
 
 
-@app.post("/api/stories/speak")
-@limiter.limit(RL_STORY_SPEAK)
-async def speak(request: Request, req: SpeakRequest):
-    _validate_session(req.voice_id, req.session_token)
-    if not FA_KEY:
-        raise HTTPException(500, "FISH_AUDIO_API_KEY not set in .env")
-
-    story = STORIES.get(req.story_key)
-    if not story:
-        raise HTTPException(404, f"Unknown story: {req.story_key}")
-
-    cache_key = hashlib.sha256(
-        f"{req.voice_id}:{req.story_key}:fa:mp3:{FA_TTS_BITRATE}".encode()
-    ).hexdigest()[:20]
-    cache_path = TTS_DIR / f"{cache_key}.mp3"
-    was_cached = cache_path.exists()
-
-    if not was_cached:
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
-                "https://api.fish.audio/v1/tts",
-                headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
-                json={
-                    "text": story["content"],
-                    "reference_id": req.voice_id,
-                    "format": "mp3",
-                    "mp3_bitrate": FA_TTS_BITRATE,
-                    "latency": "normal",
-                },
-            )
-            if r.status_code >= 400:
-                raise HTTPException(r.status_code, r.text)
-            cache_path.write_bytes(r.content)
-
-    return {"audio_url": f"/api/audio/{cache_key}.mp3", "from_cache": was_cached}
-
-
 @app.post("/api/stories/speak-timestamped")
 @limiter.limit(RL_STORY_SPEAK_TS)
 async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
@@ -860,7 +809,6 @@ async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
     if audio_path.exists():
         return {
             "audio_url": f"/api/audio/{cache_key}.mp3",
-            "alignment": None,
             "story_text": story["content"],
             "from_cache": True,
         }
@@ -883,7 +831,6 @@ async def speak_timestamped(request: Request, req: SpeakTimestampedRequest):
     audio_path.write_bytes(r.content)
     return {
         "audio_url": f"/api/audio/{cache_key}.mp3",
-        "alignment": None,
         "story_text": story["content"],
         "from_cache": False,
     }
@@ -933,53 +880,6 @@ async def get_cached_stories(voice_id: str, session_token: str):
         )).exists()
     ]
     return {"cached": cached}
-
-
-@app.post("/api/voice/speak-custom")
-@limiter.limit(RL_SPEAK_CUSTOM)
-async def speak_custom(request: Request, req: CustomSpeakRequest):
-    """TTS for user-provided text, cached by content hash."""
-    _validate_session(req.voice_id, req.session_token)
-    if not FA_KEY:
-        raise HTTPException(500, "FISH_AUDIO_API_KEY not set in .env")
-    if not req.text or not req.text.strip():
-        raise HTTPException(400, "Text cannot be empty")
-    if len(req.text) > 3000:
-        raise HTTPException(400, "Text too long — keep it under 3 000 characters")
-
-    cache_key = hashlib.sha256(
-        f"custom:{req.voice_id}:{req.text.strip()}:fa:mp3:{FA_TTS_BITRATE}".encode()
-    ).hexdigest()[:20]
-    audio_path = TTS_DIR / f"{cache_key}.mp3"
-
-    if audio_path.exists():
-        return {
-            "audio_url": f"/api/audio/{cache_key}.mp3",
-            "alignment": None,
-            "from_cache": True,
-        }
-
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(
-            "https://api.fish.audio/v1/tts",
-            headers={"Authorization": f"Bearer {FA_KEY}", "Content-Type": "application/json"},
-            json={
-                "text": req.text.strip(),
-                "reference_id": req.voice_id,
-                "format": "mp3",
-                "mp3_bitrate": FA_TTS_BITRATE,
-                "latency": "normal",
-            },
-        )
-        if r.status_code >= 400:
-            raise HTTPException(r.status_code, r.text)
-
-    audio_path.write_bytes(r.content)
-    return {
-        "audio_url": f"/api/audio/{cache_key}.mp3",
-        "alignment": None,
-        "from_cache": False,
-    }
 
 
 @app.get("/api/audio/{filename}")
@@ -1093,8 +993,6 @@ async def get_default_voice(request: Request):
         return {"voice_id": None, "session_token": None}
     return {"voice_id": DEFAULT_VOICE_ID, "session_token": DEFAULT_SESSION_TOKEN}
 
-
-# ── TEMPORARY debug endpoints — remove before launch ──────────────────────────
 
 # ── Voice management (admin) ───────────────────────────────────────────────────
 

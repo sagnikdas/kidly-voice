@@ -25,18 +25,14 @@ global_default          = "60/minute"
 # Voice recording upload chunks (multiple per session).
 recording_upload        = "30/minute"
 
-# Voice cloning — hits ElevenLabs and costs money. Keep this tight.
+# Voice cloning — hits Fish Audio and costs money. Keep this tight.
 voice_clone             = "5/hour"
 
-# Preview clip generation — also hits ElevenLabs.
+# Preview clip generation — also hits Fish Audio.
 voice_preview           = "10/hour"
 
-# Story TTS — hits ElevenLabs only on the very first play per user+story.
-story_speak             = "30/hour"
+# Story TTS — hits Fish Audio only on the very first play per user+story.
 story_speak_timestamped = "30/hour"
-
-# Custom text TTS — hits ElevenLabs every time (no story-key cache).
-voice_speak_custom      = "20/hour"
 
 # User lookup and save — prevent email enumeration and spam.
 user_save               = "10/hour"
